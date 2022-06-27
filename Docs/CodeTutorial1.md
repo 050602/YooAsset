@@ -16,8 +16,8 @@ YooAssets.InitializeAsync(CreateParameters parameters);
 ````c#
 private IEnumerator InitializeYooAsset()
 {
-    var createParameters = new YooAssets.EditorPlayModeParameters();
-    createParameters.LocationRoot = "Assets/GameRes";
+    var createParameters = new YooAssets.EditorSimulateModeParameters();
+    createParameters.LocationServices = new DefaultLocationServices("Assets/GameRes");
     yield return YooAssets.InitializeAsync(createParameters);
 }
 ````
@@ -32,7 +32,7 @@ private IEnumerator InitializeYooAsset()
 private IEnumerator InitializeYooAsset()
 {
     var createParameters = new YooAssets.OfflinePlayModeParameters();
-    createParameters.LocationRoot = "Assets/GameRes";
+    createParameters.LocationServices = new DefaultLocationServices("Assets/GameRes");
     yield return YooAssets.InitializeAsync(createParameters);
 }
 ````
@@ -43,23 +43,34 @@ private IEnumerator InitializeYooAsset()
 
 注意：该模式需要构建资源包
 
-- LocationRoot : 资源定位的根路径，所有通过代码加载的资源文件都需要放在资源定位的根路径下。
+- LocationServices : 资源定位的实例类。
+  
+  (1) 默认的资源定位服务类（DefaultLocationServices）
+  
+  (2) 可寻址的资源定位服务类（AddressLocationServices）
+  
+  (3) 开发者自定义的资源定位服务类，需要提供实现ILocationServices接口的实例类。
+  
 - DecryptionServices : 如果资源包在构建的时候有加密，需要提供实现IDecryptionServices接口的实例类。
+
 - ClearCacheWhenDirty : 安装包在覆盖安装的时候，是否清空沙盒缓存文件夹。
-- IgnoreResourceVersion : 是否忽略资源版本号，请参考进阶教程。
+
 - DefaultHostServer : 默认的资源服务器IP地址。
+
 - FallbackHostServer : 备用的资源服务器IP地址。
+
+- VerifyLevel : 下载文件校验等级
 
 ````c#
 private IEnumerator InitializeYooAsset()
 {
     var createParameters = new YooAssets.HostPlayModeParameters();
-    createParameters.LocationRoot = "Assets/GameRes";
+    createParameters.LocationServices = new DefaultLocationServices("Assets/GameRes");
     createParameters.DecryptionServices = null;
     createParameters.ClearCacheWhenDirty = false;
-    createParameters.IgnoreResourceVersion = false;
     createParameters.DefaultHostServer = "http://127.0.0.1/CDN1/Android";
     createParameters.FallbackHostServer = "http://127.0.0.1/CDN2/Android";
+    createParameters.VerifyLevel = EVerifyLevel.High;
     yield return YooAssets.InitializeAsync(createParameters);
 }
 ````
@@ -69,7 +80,7 @@ private IEnumerator InitializeYooAsset()
 ````c#
 public class BundleDecryption : IDecryptionServices
 {
-    public ulong GetFileOffset(BundleInfo bundleInfo)
+    public ulong GetFileOffset()
     {
         return 32;
     }

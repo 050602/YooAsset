@@ -3,22 +3,24 @@ using System.Collections.Generic;
 
 namespace YooAsset
 {
-    internal abstract class BundledProvider : AssetProviderBase
+    internal abstract class BundledProvider : ProviderBase
     {
-		protected BundleFileLoader OwnerBundle { private set; get; }
-		protected DependBundleGrouper DependBundles { private set; get; }
+		protected AssetBundleLoaderBase OwnerBundle { private set; get; }
+		protected DependAssetBundleGroup DependBundleGroup { private set; get; }
 
-		public BundledProvider(string assetPath, System.Type assetType) : base(assetPath, assetType)
+		public BundledProvider(AssetInfo assetInfo) : base(assetInfo)
 		{
-			OwnerBundle = AssetSystem.CreateOwnerBundleLoader(assetPath);
+			OwnerBundle = AssetSystem.CreateOwnerAssetBundleLoader(assetInfo);
 			OwnerBundle.Reference();
 			OwnerBundle.AddProvider(this);
-			DependBundles = new DependBundleGrouper(assetPath);
-			DependBundles.Reference();
+
+			var dependBundles = AssetSystem.CreateDependAssetBundleLoaders(assetInfo);
+			DependBundleGroup = new DependAssetBundleGroup(dependBundles);
+			DependBundleGroup.Reference();
 		}
-		public override void Destory()
+		public override void Destroy()
 		{
-			base.Destory();
+			base.Destroy();
 
 			// 释放资源包
 			if (OwnerBundle != null)
@@ -26,10 +28,10 @@ namespace YooAsset
 				OwnerBundle.Release();
 				OwnerBundle = null;
 			}
-			if (DependBundles != null)
+			if (DependBundleGroup != null)
 			{
-				DependBundles.Release();
-				DependBundles = null;
+				DependBundleGroup.Release();
+				DependBundleGroup = null;
 			}
 		}
 
@@ -39,13 +41,12 @@ namespace YooAsset
 		internal void GetBundleDebugInfos(List<DebugBundleInfo> output)
 		{
 			var bundleInfo = new DebugBundleInfo();
-			bundleInfo.BundleName = OwnerBundle.BundleFileInfo.BundleName;
-			bundleInfo.Version = OwnerBundle.BundleFileInfo.Version;
+			bundleInfo.BundleName = OwnerBundle.MainBundleInfo.BundleName;
 			bundleInfo.RefCount = OwnerBundle.RefCount;
 			bundleInfo.Status = (int)OwnerBundle.Status;
 			output.Add(bundleInfo);
 
-			DependBundles.GetBundleDebugInfos(output);
+			DependBundleGroup.GetBundleDebugInfos(output);
 		}
 	}
 }

@@ -6,6 +6,7 @@ using UnityEditor;
 
 namespace YooAsset.Editor
 {
+	[TaskAttribute("资源构建准备工作")]
 	public class TaskPrepare : IBuildTask
 	{
 		void IBuildTask.Run(BuildContext context)
@@ -25,12 +26,9 @@ namespace YooAsset.Editor
 			if (string.IsNullOrEmpty(buildParameters.PipelineOutputDirectory))
 				throw new Exception("输出目录不能为空");
 
-			// 检测资源收集配置文件
-			if (AssetBundleCollectorSettingData.GetCollecterCount() == 0)
-				throw new Exception("配置的资源收集路径为空");
-
 			// 增量更新时候的必要检测
-			if (buildParameters.Parameters.ForceRebuild == false)
+			var buildMode = buildParameters.Parameters.BuildMode;
+			if (buildMode == EBuildMode.IncrementalBuild)
 			{
 				// 检测历史版本是否存在
 				if (AssetBundleBuilderHelper.HasAnyPackageVersion(buildParameters.Parameters.BuildTarget, buildParameters.Parameters.OutputRoot) == false)
@@ -46,27 +44,27 @@ namespace YooAsset.Editor
 				if (Directory.Exists(packageDirectory))
 					throw new Exception($"补丁包已经存在：{packageDirectory}");
 
-				// 检测内置资源标记是否一致
-				PatchManifest oldPatchManifest = AssetBundleBuilderHelper.LoadPatchManifestFile(buildParameters.PipelineOutputDirectory);
+				// 检测内置资源分类标签是否一致
+				var oldPatchManifest = AssetBundleBuilderHelper.GetOldPatchManifest(buildParameters.PipelineOutputDirectory);
 				if (buildParameters.Parameters.BuildinTags != oldPatchManifest.BuildinTags)
-					throw new Exception($"增量更新时内置资源标记必须一致：{buildParameters.Parameters.BuildinTags} != {oldPatchManifest.BuildinTags}");
+					throw new Exception($"增量更新时内置资源标签必须一致：{buildParameters.Parameters.BuildinTags} != {oldPatchManifest.BuildinTags}");
 			}
 
 			// 如果是强制重建
-			if (buildParameters.Parameters.ForceRebuild)
+			if (buildMode == EBuildMode.ForceRebuild)
 			{
 				// 删除平台总目录
 				string platformDirectory = $"{buildParameters.Parameters.OutputRoot}/{buildParameters.Parameters.BuildTarget}";
 				if (EditorTools.DeleteDirectory(platformDirectory))
 				{
-					UnityEngine.Debug.Log($"删除平台总目录：{platformDirectory}");
+					BuildRunner.Log($"删除平台总目录：{platformDirectory}");
 				}
 			}
 
 			// 如果输出目录不存在
 			if (EditorTools.CreateDirectory(buildParameters.PipelineOutputDirectory))
 			{
-				UnityEngine.Debug.Log($"创建输出目录：{buildParameters.PipelineOutputDirectory}");
+				BuildRunner.Log($"创建输出目录：{buildParameters.PipelineOutputDirectory}");
 			}
 		}
 	}

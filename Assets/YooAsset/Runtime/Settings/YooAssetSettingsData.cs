@@ -2,7 +2,7 @@
 
 namespace YooAsset
 {
-	internal static class ResourceSettingData
+	internal static class YooAssetSettingsData
 	{
 		private static YooAssetSettings _setting = null;
 		public static YooAssetSettings Setting
@@ -28,8 +28,32 @@ namespace YooAsset
 			}
 			else
 			{
-				YooLogger.Log("YooAsset use custom settings.");
+				YooLogger.Log("YooAsset use user settings.");
 			}
+		}
+
+		/// <summary>
+		/// 获取构建报告文件名
+		/// </summary>
+		public static string GetReportFileName(int resourceVersion)
+		{
+			return $"{YooAssetSettings.ReportFileName}_{resourceVersion}.json";
+		}
+
+		/// <summary>
+		/// 获取补丁清单文件完整名称
+		/// </summary>
+		public static string GetPatchManifestFileName(int resourceVersion)
+		{
+			return $"{Setting.PatchManifestFileName}_{resourceVersion}.bytes";
+		}
+
+		/// <summary>
+		/// 获取补丁清单哈希文件完整名称
+		/// </summary>
+		public static string GetPatchManifestHashFileName(int resourceVersion)
+		{
+			return $"{Setting.PatchManifestFileName}_{resourceVersion}.hash";
 		}
 	}
 }

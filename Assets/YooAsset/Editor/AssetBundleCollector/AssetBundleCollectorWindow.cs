@@ -1,243 +1,650 @@
-﻿using System.Collections;
+﻿#if UNITY_2019_4_OR_NEWER
+using System.IO;
+using System.Linq;
 using System.Collections.Generic;
-using UnityEngine;
 using UnityEditor;
+using UnityEngine;
+using UnityEditor.UIElements;
+using UnityEngine.UIElements;
 
 namespace YooAsset.Editor
 {
 	public class AssetBundleCollectorWindow : EditorWindow
 	{
-		static AssetBundleCollectorWindow _thisInstance;
-
 		[MenuItem("YooAsset/AssetBundle Collector", false, 101)]
-		static void ShowWindow()
+		public static void ShowExample()
 		{
-			if (_thisInstance == null)
+			AssetBundleCollectorWindow window = GetWindow<AssetBundleCollectorWindow>("资源包收集工具", true, EditorDefine.DockedWindowTypes);
+			window.minSize = new Vector2(800, 600);
+		}
+
+		private List<string> _collectorTypeList;
+		private List<string> _activeRuleList;
+		private List<string> _addressRuleList;
+		private List<string> _packRuleList;
+		private List<string> _filterRuleList;
+		private ListView _groupListView;
+		private ScrollView _collectorScrollView;
+		private PopupField<string> _activeRulePopupField;
+		private Toggle _enableAddressableToogle;
+		private Toggle _autoCollectShaderToogle;
+		private TextField _shaderBundleNameTxt;
+		private TextField _groupNameTxt;
+		private TextField _groupDescTxt;
+		private TextField _groupAssetTagsTxt;
+		private VisualElement _groupContainer;
+		private string _lastModifyGroup = string.Empty;
+
+
+		public void CreateGUI()
+		{
+			Undo.undoRedoPerformed -= RefreshWindow;
+			Undo.undoRedoPerformed += RefreshWindow;
+
+			try
 			{
-				_thisInstance = EditorWindow.GetWindow(typeof(AssetBundleCollectorWindow), false, "资源包收集工具", true) as AssetBundleCollectorWindow;
-				_thisInstance.minSize = new Vector2(800, 600);
+				_collectorTypeList = new List<string>()
+				{
+					$"{nameof(ECollectorType.MainAssetCollector)}",
+					$"{nameof(ECollectorType.StaticAssetCollector)}",
+					$"{nameof(ECollectorType.DependAssetCollector)}"
+				};
+				_activeRuleList = AssetBundleCollectorSettingData.GetActiveRuleNames();
+				_addressRuleList = AssetBundleCollectorSettingData.GetAddressRuleNames();
+				_packRuleList = AssetBundleCollectorSettingData.GetPackRuleNames();
+				_filterRuleList = AssetBundleCollectorSettingData.GetFilterRuleNames();
+
+				VisualElement root = this.rootVisualElement;
+
+				// 加载布局文件
+				var visualAsset = EditorHelper.LoadWindowUXML<AssetBundleCollectorWindow>();
+				if (visualAsset == null)
+					return;
+
+				visualAsset.CloneTree(root);
+
+				// 导入导出按钮
+				var exportBtn = root.Q<Button>("ExportButton");
+				exportBtn.clicked += ExportBtn_clicked;
+				var importBtn = root.Q<Button>("ImportButton");
+				importBtn.clicked += ImportBtn_clicked;
+
+				// 公共设置相关
+				_enableAddressableToogle = root.Q<Toggle>("EnableAddressable");
+				_enableAddressableToogle.RegisterValueChangedCallback(evt =>
+				{
+					AssetBundleCollectorSettingData.ModifyAddressable(evt.newValue);
+					RefreshWindow();
+				});
+				_autoCollectShaderToogle = root.Q<Toggle>("AutoCollectShader");
+				_autoCollectShaderToogle.RegisterValueChangedCallback(evt =>
+				{
+					AssetBundleCollectorSettingData.ModifyShader(evt.newValue, _shaderBundleNameTxt.value);
+					_shaderBundleNameTxt.SetEnabled(evt.newValue);
+				});
+				_shaderBundleNameTxt = root.Q<TextField>("ShaderBundleName");
+				_shaderBundleNameTxt.RegisterValueChangedCallback(evt =>
+				{
+					AssetBundleCollectorSettingData.ModifyShader(_autoCollectShaderToogle.value, evt.newValue);
+				});
+
+				// 分组列表相关
+				_groupListView = root.Q<ListView>("GroupListView");
+				_groupListView.makeItem = MakeGroupListViewItem;
+				_groupListView.bindItem = BindGroupListViewItem;
+#if UNITY_2020_1_OR_NEWER
+				_groupListView.onSelectionChange += GroupListView_onSelectionChange;
+#else
+				_groupListView.onSelectionChanged += GroupListView_onSelectionChange;
+#endif
+
+				// 分组添加删除按钮
+				var groupAddContainer = root.Q("GroupAddContainer");
+				{
+					var addBtn = groupAddContainer.Q<Button>("AddBtn");
+					addBtn.clicked += AddGroupBtn_clicked;
+					var removeBtn = groupAddContainer.Q<Button>("RemoveBtn");
+					removeBtn.clicked += RemoveGroupBtn_clicked;
+				}
+
+				// 分组容器
+				_groupContainer = root.Q("GroupContainer");
+
+				// 分组名称
+				_groupNameTxt = root.Q<TextField>("GroupName");
+				_groupNameTxt.RegisterValueChangedCallback(evt =>
+				{
+					var selectGroup = _groupListView.selectedItem as AssetBundleCollectorGroup;
+					if (selectGroup != null)
+					{
+						selectGroup.GroupName = evt.newValue;
+						AssetBundleCollectorSettingData.ModifyGroup(selectGroup);
+					}
+				});
+
+				// 分组备注
+				_groupDescTxt = root.Q<TextField>("GroupDesc");
+				_groupDescTxt.RegisterValueChangedCallback(evt =>
+				{
+					var selectGroup = _groupListView.selectedItem as AssetBundleCollectorGroup;
+					if (selectGroup != null)
+					{
+						selectGroup.GroupDesc = evt.newValue;
+						AssetBundleCollectorSettingData.ModifyGroup(selectGroup);
+					}
+				});
+
+				// 分组的资源标签
+				_groupAssetTagsTxt = root.Q<TextField>("GroupAssetTags");
+				_groupAssetTagsTxt.RegisterValueChangedCallback(evt =>
+				{
+					var selectGroup = _groupListView.selectedItem as AssetBundleCollectorGroup;
+					if (selectGroup != null)
+					{
+						selectGroup.AssetTags = evt.newValue;
+						AssetBundleCollectorSettingData.ModifyGroup(selectGroup);
+					}
+				});
+
+				// 收集列表相关
+				_collectorScrollView = root.Q<ScrollView>("CollectorScrollView");
+				_collectorScrollView.style.height = new Length(100, LengthUnit.Percent);
+				_collectorScrollView.viewDataKey = "scrollView";
+
+				// 收集器创建按钮
+				var collectorAddContainer = root.Q("CollectorAddContainer");
+				{
+					var addBtn = collectorAddContainer.Q<Button>("AddBtn");
+					addBtn.clicked += AddCollectorBtn_clicked;
+				}
+
+				// 分组激活规则
+				var activeRuleContainer = root.Q("ActiveRuleContainer");
+				{
+					_activeRulePopupField = new PopupField<string>("Active Rule", _activeRuleList, 0);
+					_activeRulePopupField.name = "ActiveRuleMaskField";
+					_activeRulePopupField.style.unityTextAlign = TextAnchor.MiddleLeft;
+					activeRuleContainer.Add(_activeRulePopupField);
+					_activeRulePopupField.RegisterValueChangedCallback(evt =>
+					{
+						var selectGroup = _groupListView.selectedItem as AssetBundleCollectorGroup;
+						if (selectGroup != null)
+						{
+							selectGroup.ActiveRuleName = evt.newValue;
+							AssetBundleCollectorSettingData.ModifyGroup(selectGroup);
+							FillGroupViewData();
+						}
+					});
+				}
+
+				// 刷新窗体
+				RefreshWindow();
 			}
-			_thisInstance.Show();
-		}
-
-		/// <summary>
-		/// 上次打开的文件夹路径
-		/// </summary>
-		private string _lastOpenFolderPath = "Assets/";
-
-		// GUI相关
-		private const float GuiDirecotryMinSize = 300f;
-		private const float GuiDirecotryMaxSize = 800f;
-		private const float GuiPackRuleSize = 130f;
-		private const float GuiFilterRuleSize = 130f;
-		private const float GuiDontWriteAssetPathSize = 130f;
-		private const float GuiAssetTagsMinSize = 100f;
-		private const float GuiAssetTagsMaxSize = 300f;
-		private const float GuiBtnSize = 40f;
-		private Vector2 _scrollPos = Vector2.zero;
-
-		// 初始化相关
-		private string[] _packRuleArray = null;
-		private string[] _filterRuleArray = null;
-		private bool _isInit = false;
-
-
-		private void Init()
-		{
-			List<string> packRuleNames = AssetBundleCollectorSettingData.GetPackRuleNames();
-			_packRuleArray = packRuleNames.ToArray();
-
-			List<string> filterRuleNames = AssetBundleCollectorSettingData.GetFilterRuleNames();
-			_filterRuleArray = filterRuleNames.ToArray();
-		}
-		private int PackRuleNameToIndex(string name)
-		{
-			for (int i = 0; i < _packRuleArray.Length; i++)
+			catch (System.Exception e)
 			{
-				if (_packRuleArray[i] == name)
+				Debug.LogError(e.ToString());
+			}
+		}
+		public void OnDestroy()
+		{
+			// 注意：清空所有撤销操作
+			Undo.ClearAll();
+
+			if (AssetBundleCollectorSettingData.IsDirty)
+				AssetBundleCollectorSettingData.SaveFile();
+		}
+
+		private void RefreshWindow()
+		{
+			_enableAddressableToogle.SetValueWithoutNotify(AssetBundleCollectorSettingData.Setting.EnableAddressable);
+			_autoCollectShaderToogle.SetValueWithoutNotify(AssetBundleCollectorSettingData.Setting.AutoCollectShaders);
+			_shaderBundleNameTxt.SetEnabled(AssetBundleCollectorSettingData.Setting.AutoCollectShaders);
+			_shaderBundleNameTxt.SetValueWithoutNotify(AssetBundleCollectorSettingData.Setting.ShadersBundleName);
+			_groupContainer.visible = false;
+
+			FillGroupViewData();
+		}
+		private void ExportBtn_clicked()
+		{
+			string resultPath = EditorTools.OpenFolderPanel("Export XML", "Assets/");
+			if (resultPath != null)
+			{
+				AssetBundleCollectorConfig.ExportXmlConfig($"{resultPath}/{nameof(AssetBundleCollectorConfig)}.xml");
+			}
+		}
+		private void ImportBtn_clicked()
+		{
+			string resultPath = EditorTools.OpenFilePath("Import XML", "Assets/", "xml");
+			if (resultPath != null)
+			{
+				AssetBundleCollectorConfig.ImportXmlConfig(resultPath);
+				RefreshWindow();
+			}
+		}
+
+		// 分组列表相关
+		private void FillGroupViewData()
+		{
+			_groupListView.Clear();
+			_groupListView.ClearSelection();
+			_groupListView.itemsSource = AssetBundleCollectorSettingData.Setting.Groups;
+			_groupListView.Rebuild();
+
+			for (int index = 0; index < AssetBundleCollectorSettingData.Setting.Groups.Count; index++)
+			{
+				var group = AssetBundleCollectorSettingData.Setting.Groups[index];
+				if (group.GroupName == _lastModifyGroup)
+				{
+					_groupListView.selectedIndex = index;
+					break;
+				}
+			}
+		}
+		private VisualElement MakeGroupListViewItem()
+		{
+			VisualElement element = new VisualElement();
+
+			{
+				var label = new Label();
+				label.name = "Label1";
+				label.style.unityTextAlign = TextAnchor.MiddleLeft;
+				label.style.flexGrow = 1f;
+				label.style.height = 20f;
+				element.Add(label);
+			}
+
+			return element;
+		}
+		private void BindGroupListViewItem(VisualElement element, int index)
+		{
+			var group = AssetBundleCollectorSettingData.Setting.Groups[index];
+
+			// Group Name
+			var textField1 = element.Q<Label>("Label1");
+			if (string.IsNullOrEmpty(group.GroupDesc))
+				textField1.text = group.GroupName;
+			else
+				textField1.text = $"{group.GroupName} ({group.GroupDesc})";
+
+			// 激活状态
+			IActiveRule activeRule = AssetBundleCollectorSettingData.GetActiveRuleInstance(group.ActiveRuleName);
+			bool isActive = activeRule.IsActiveGroup();
+			textField1.SetEnabled(isActive);
+		}
+		private void GroupListView_onSelectionChange(IEnumerable<object> objs)
+		{
+			FillCollectorViewData();
+		}
+		private void AddGroupBtn_clicked()
+		{
+			Undo.RecordObject(AssetBundleCollectorSettingData.Setting, "YooAsset.AssetBundleCollectorWindow AddGroup");
+			AssetBundleCollectorSettingData.CreateGroup("Default Group");
+			FillGroupViewData();
+		}
+		private void RemoveGroupBtn_clicked()
+		{
+			var selectGroup = _groupListView.selectedItem as AssetBundleCollectorGroup;
+			if (selectGroup == null)
+				return;
+
+			Undo.RecordObject(AssetBundleCollectorSettingData.Setting, "YooAsset.AssetBundleCollectorWindow RemoveGroup");
+			AssetBundleCollectorSettingData.RemoveGroup(selectGroup);
+			FillGroupViewData();
+		}
+
+		// 收集列表相关
+		private void FillCollectorViewData()
+		{
+			var selectGroup = _groupListView.selectedItem as AssetBundleCollectorGroup;
+			if (selectGroup == null)
+			{
+				_groupContainer.visible = false;
+				return;
+			}
+
+			_lastModifyGroup = selectGroup.GroupName;
+			_groupContainer.visible = true;
+			_activeRulePopupField.SetValueWithoutNotify(selectGroup.ActiveRuleName);
+			_groupNameTxt.SetValueWithoutNotify(selectGroup.GroupName);
+			_groupDescTxt.SetValueWithoutNotify(selectGroup.GroupDesc);
+			_groupAssetTagsTxt.SetValueWithoutNotify(selectGroup.AssetTags);
+
+			// 填充数据
+			_collectorScrollView.Clear();
+			for (int i = 0; i < selectGroup.Collectors.Count; i++)
+			{
+				VisualElement element = MakeCollectorListViewItem();
+				BindCollectorListViewItem(element, i);
+				_collectorScrollView.Add(element);
+			}
+		}
+		private VisualElement MakeCollectorListViewItem()
+		{
+			VisualElement element = new VisualElement();
+
+			VisualElement elementTop = new VisualElement();
+			elementTop.style.flexDirection = FlexDirection.Row;
+			element.Add(elementTop);
+
+			VisualElement elementBottom = new VisualElement();
+			elementBottom.style.flexDirection = FlexDirection.Row;
+			element.Add(elementBottom);
+
+			VisualElement elementFoldout = new VisualElement();
+			elementFoldout.style.flexDirection = FlexDirection.Row;
+			element.Add(elementFoldout);
+
+			VisualElement elementSpace = new VisualElement();
+			elementSpace.style.flexDirection = FlexDirection.Column;
+			element.Add(elementSpace);
+
+			// Top VisualElement
+			{
+				var button = new Button();
+				button.name = "Button1";
+				button.text = "-";
+				button.style.unityTextAlign = TextAnchor.MiddleCenter;
+				button.style.flexGrow = 0f;
+				elementTop.Add(button);
+			}
+			{
+				var objectField = new ObjectField();
+				objectField.name = "ObjectField1";
+				objectField.label = "Collector";
+				objectField.objectType = typeof(UnityEngine.Object);
+				objectField.style.unityTextAlign = TextAnchor.MiddleLeft;
+				objectField.style.flexGrow = 1f;
+				elementTop.Add(objectField);
+				var label = objectField.Q<Label>();
+				label.style.minWidth = 63;
+			}
+
+			// Bottom VisualElement
+			{
+				var label = new Label();
+				label.style.width = 90;
+				elementBottom.Add(label);
+			}
+			{
+				var popupField = new PopupField<string>(_collectorTypeList, 0);
+				popupField.name = "PopupField0";
+				popupField.style.unityTextAlign = TextAnchor.MiddleLeft;
+				popupField.style.width = 150;
+				elementBottom.Add(popupField);
+			}
+			if (_enableAddressableToogle.value)
+			{
+				var popupField = new PopupField<string>(_addressRuleList, 0);
+				popupField.name = "PopupField1";
+				popupField.style.unityTextAlign = TextAnchor.MiddleLeft;
+				popupField.style.width = 200;
+				elementBottom.Add(popupField);
+			}
+			{
+				var popupField = new PopupField<string>(_packRuleList, 0);
+				popupField.name = "PopupField2";
+				popupField.style.unityTextAlign = TextAnchor.MiddleLeft;
+				popupField.style.width = 150;
+				elementBottom.Add(popupField);
+			}
+			{
+				var popupField = new PopupField<string>(_filterRuleList, 0);
+				popupField.name = "PopupField3";
+				popupField.style.unityTextAlign = TextAnchor.MiddleLeft;
+				popupField.style.width = 150;
+				elementBottom.Add(popupField);
+			}
+			{
+				var textField = new TextField();
+				textField.name = "TextField1";
+				textField.label = "Tags";
+				textField.style.width = 100;
+				textField.style.marginLeft = 20;
+				textField.style.flexGrow = 1;
+				elementBottom.Add(textField);
+				var label = textField.Q<Label>();
+				label.style.minWidth = 40;
+			}
+
+			// Foldout VisualElement
+			{
+				var label = new Label();
+				label.style.width = 90;
+				elementFoldout.Add(label);
+			}
+			{
+				var foldout = new Foldout();
+				foldout.name = "Foldout1";
+				foldout.value = false;
+				foldout.text = "Main Assets";
+				elementFoldout.Add(foldout);
+			}
+
+			// Space VisualElement
+			{
+				var label = new Label();
+				label.style.height = 10;
+				elementSpace.Add(label);
+			}
+
+			return element;
+		}
+		private void BindCollectorListViewItem(VisualElement element, int index)
+		{
+			var selectGroup = _groupListView.selectedItem as AssetBundleCollectorGroup;
+			if (selectGroup == null)
+				return;
+
+			var collector = selectGroup.Collectors[index];
+			var collectObject = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(collector.CollectPath);
+			if (collectObject != null)
+				collectObject.name = collector.CollectPath;
+
+			// Foldout
+			var foldout = element.Q<Foldout>("Foldout1");
+			foldout.RegisterValueChangedCallback(evt =>
+			{
+				if (evt.newValue)
+					RefreshFoldout(foldout, selectGroup, collector);
+				else
+					foldout.Clear();
+			});
+
+			// Remove Button
+			var removeBtn = element.Q<Button>("Button1");
+			removeBtn.clicked += () =>
+			{
+				RemoveCollectorBtn_clicked(collector);
+			};
+
+			// Collector Path
+			var objectField1 = element.Q<ObjectField>("ObjectField1");
+			objectField1.SetValueWithoutNotify(collectObject);
+			objectField1.RegisterValueChangedCallback(evt =>
+			{
+				collector.CollectPath = AssetDatabase.GetAssetPath(evt.newValue);
+				objectField1.value.name = collector.CollectPath;
+				AssetBundleCollectorSettingData.ModifyCollector(selectGroup, collector);
+				if (foldout.value)
+				{
+					RefreshFoldout(foldout, selectGroup, collector);
+				}
+			});
+
+			// Collector Type
+			var popupField0 = element.Q<PopupField<string>>("PopupField0");
+			popupField0.index = GetCollectorTypeIndex(collector.CollectorType.ToString());
+			popupField0.RegisterValueChangedCallback(evt =>
+			{
+				collector.CollectorType = StringUtility.NameToEnum<ECollectorType>(evt.newValue);
+				AssetBundleCollectorSettingData.ModifyCollector(selectGroup, collector);
+				if (foldout.value)
+				{
+					RefreshFoldout(foldout, selectGroup, collector);
+				}
+			});
+
+			// Address Rule
+			var popupField1 = element.Q<PopupField<string>>("PopupField1");
+			if (popupField1 != null)
+			{
+				popupField1.index = GetAddressRuleIndex(collector.AddressRuleName);
+				popupField1.RegisterValueChangedCallback(evt =>
+				{
+					collector.AddressRuleName = evt.newValue;
+					AssetBundleCollectorSettingData.ModifyCollector(selectGroup, collector);
+					if (foldout.value)
+					{
+						RefreshFoldout(foldout, selectGroup, collector);
+					}
+				});
+			}
+
+			// Pack Rule
+			var popupField2 = element.Q<PopupField<string>>("PopupField2");
+			popupField2.index = GetPackRuleIndex(collector.PackRuleName);
+			popupField2.RegisterValueChangedCallback(evt =>
+			{
+				collector.PackRuleName = evt.newValue;
+				AssetBundleCollectorSettingData.ModifyCollector(selectGroup, collector);
+				if (foldout.value)
+				{
+					RefreshFoldout(foldout, selectGroup, collector);
+				}
+			});
+
+			// Filter Rule
+			var popupField3 = element.Q<PopupField<string>>("PopupField3");
+			popupField3.index = GetFilterRuleIndex(collector.FilterRuleName);
+			popupField3.RegisterValueChangedCallback(evt =>
+			{
+				collector.FilterRuleName = evt.newValue;
+				AssetBundleCollectorSettingData.ModifyCollector(selectGroup, collector);
+				if (foldout.value)
+				{
+					RefreshFoldout(foldout, selectGroup, collector);
+				}
+			});
+
+			// Tags
+			var textFiled1 = element.Q<TextField>("TextField1");
+			textFiled1.SetValueWithoutNotify(collector.AssetTags);
+			textFiled1.RegisterValueChangedCallback(evt =>
+			{
+				collector.AssetTags = evt.newValue;
+				AssetBundleCollectorSettingData.ModifyCollector(selectGroup, collector);
+			});
+		}
+		private void RefreshFoldout(Foldout foldout, AssetBundleCollectorGroup group, AssetBundleCollector collector)
+		{
+			// 清空旧元素
+			foldout.Clear();
+
+			if (collector.IsValid() == false)
+			{
+				Debug.LogWarning($"The collector is invalid : {collector.CollectPath} in group : {group.GroupName}");
+				return;
+			}
+
+			if (collector.CollectorType == ECollectorType.MainAssetCollector || collector.CollectorType == ECollectorType.StaticAssetCollector)
+			{
+				List<CollectAssetInfo> collectAssetInfos = null;
+
+				try
+				{
+					collectAssetInfos = collector.GetAllCollectAssets(EBuildMode.DryRunBuild, group);
+				}
+				catch (System.Exception e)
+				{
+					Debug.LogError(e.ToString());
+				}
+
+				if (collectAssetInfos != null)
+				{
+					foreach (var collectAssetInfo in collectAssetInfos)
+					{
+						VisualElement elementRow = new VisualElement();
+						elementRow.style.flexDirection = FlexDirection.Row;
+						foldout.Add(elementRow);
+
+						string showInfo = collectAssetInfo.AssetPath;
+						if (_enableAddressableToogle.value)
+						{
+							IAddressRule instance = AssetBundleCollectorSettingData.GetAddressRuleInstance(collector.AddressRuleName);
+							AddressRuleData ruleData = new AddressRuleData(collectAssetInfo.AssetPath, collector.CollectPath, group.GroupName);
+							string addressValue = instance.GetAssetAddress(ruleData);
+							showInfo = $"[{addressValue}] {showInfo}";
+						}
+
+						var label = new Label();
+						label.text = showInfo;
+						label.style.width = 300;
+						label.style.marginLeft = 0;
+						label.style.flexGrow = 1;
+						elementRow.Add(label);
+					}
+				}
+			}
+		}
+		private void AddCollectorBtn_clicked()
+		{
+			var selectGroup = _groupListView.selectedItem as AssetBundleCollectorGroup;
+			if (selectGroup == null)
+				return;
+
+			Undo.RecordObject(AssetBundleCollectorSettingData.Setting, "YooAsset.AssetBundleCollectorWindow AddCollector");
+			AssetBundleCollectorSettingData.CreateCollector(selectGroup, string.Empty);
+			FillCollectorViewData();
+		}
+		private void RemoveCollectorBtn_clicked(AssetBundleCollector selectCollector)
+		{
+			var selectGroup = _groupListView.selectedItem as AssetBundleCollectorGroup;
+			if (selectGroup == null)
+				return;
+			if (selectCollector == null)
+				return;
+
+			Undo.RecordObject(AssetBundleCollectorSettingData.Setting, "YooAsset.AssetBundleCollectorWindow RemoveCollector");
+			AssetBundleCollectorSettingData.RemoveCollector(selectGroup, selectCollector);
+			FillCollectorViewData();
+		}
+
+		private int GetCollectorTypeIndex(string typeName)
+		{
+			for (int i = 0; i < _collectorTypeList.Count; i++)
+			{
+				if (_collectorTypeList[i] == typeName)
 					return i;
 			}
 			return 0;
 		}
-		private string IndexToPackRuleName(int index)
+		private int GetAddressRuleIndex(string ruleName)
 		{
-			for (int i = 0; i < _packRuleArray.Length; i++)
+			for (int i = 0; i < _addressRuleList.Count; i++)
 			{
-				if (i == index)
-					return _packRuleArray[i];
-			}
-			return string.Empty;
-		}
-		private int FilterRuleNameToIndex(string name)
-		{
-			for (int i = 0; i < _filterRuleArray.Length; i++)
-			{
-				if (_filterRuleArray[i] == name)
+				if (_addressRuleList[i] == ruleName)
 					return i;
 			}
 			return 0;
 		}
-		private string IndexToFilterRuleName(int index)
+		private int GetPackRuleIndex(string ruleName)
 		{
-			for (int i = 0; i < _filterRuleArray.Length; i++)
+			for (int i = 0; i < _packRuleList.Count; i++)
 			{
-				if (i == index)
-					return _filterRuleArray[i];
+				if (_packRuleList[i] == ruleName)
+					return i;
 			}
-			return string.Empty;
+			return 0;
 		}
-
-		private void OnGUI()
+		private int GetFilterRuleIndex(string ruleName)
 		{
-			if (_isInit == false)
+			for (int i = 0; i < _filterRuleList.Count; i++)
 			{
-				_isInit = true;
-				Init();
+				if (_filterRuleList[i] == ruleName)
+					return i;
 			}
-
-			OnDrawShader();
-			OnDrawHeadBar();
-			OnDrawCollector();
-		}
-		private void OnDrawShader()
-		{
-			bool isCollectAllShader = AssetBundleCollectorSettingData.Setting.AutoCollectShaders;
-			string shadersBundleName = AssetBundleCollectorSettingData.Setting.ShadersBundleName;
-
-			EditorGUILayout.Space();
-
-			bool newToggleValue = EditorGUILayout.Toggle("收集所有着色器", isCollectAllShader);
-			if (newToggleValue != isCollectAllShader)
-			{
-				isCollectAllShader = newToggleValue;
-				AssetBundleCollectorSettingData.ModifyShader(isCollectAllShader, shadersBundleName);
-			}
-
-			if (isCollectAllShader)
-			{
-				string newTextValue = EditorGUILayout.TextField("AssetBundle名称", shadersBundleName, GUILayout.MaxWidth(300));
-				if (newTextValue != shadersBundleName)
-				{
-					shadersBundleName = newTextValue;
-					AssetBundleCollectorSettingData.ModifyShader(isCollectAllShader, shadersBundleName);
-				}
-			}
-		}
-		private void OnDrawHeadBar()
-		{
-			EditorGUILayout.Space();
-			EditorGUILayout.Space();
-			EditorGUILayout.BeginHorizontal();
-			EditorGUILayout.LabelField("Directory", GUILayout.MinWidth(GuiDirecotryMinSize), GUILayout.MaxWidth(GuiDirecotryMaxSize));
-			EditorGUILayout.LabelField("PackRule", GUILayout.MinWidth(GuiPackRuleSize), GUILayout.MaxWidth(GuiPackRuleSize));
-			EditorGUILayout.LabelField("FilterRule", GUILayout.MinWidth(GuiFilterRuleSize), GUILayout.MaxWidth(GuiFilterRuleSize));
-			EditorGUILayout.LabelField("DontWriteAssetPath", GUILayout.MinWidth(GuiDontWriteAssetPathSize), GUILayout.MaxWidth(GuiDontWriteAssetPathSize));
-			EditorGUILayout.LabelField("AssetTags", GUILayout.MinWidth(GuiAssetTagsMinSize), GUILayout.MaxWidth(GuiAssetTagsMaxSize));
-			EditorGUILayout.LabelField("", GUILayout.MinWidth(GuiBtnSize), GUILayout.MaxWidth(GuiBtnSize));
-			EditorGUILayout.EndHorizontal();
-		}
-		private void OnDrawCollector()
-		{
-			// 列表显示
-			EditorGUILayout.Space();
-			_scrollPos = EditorGUILayout.BeginScrollView(_scrollPos);
-			for (int i = 0; i < AssetBundleCollectorSettingData.Setting.Collectors.Count; i++)
-			{
-				var collector = AssetBundleCollectorSettingData.Setting.Collectors[i];
-				string directory = collector.CollectDirectory;
-				string packRuleName = collector.PackRuleName;
-				string filterRuleName = collector.FilterRuleName;
-				bool dontWriteAssetPath = collector.DontWriteAssetPath;
-				string assetTags = collector.AssetTags;
-
-				EditorGUILayout.BeginHorizontal();
-				{
-					// Directory
-					EditorGUILayout.LabelField(directory, GUILayout.MinWidth(GuiDirecotryMinSize), GUILayout.MaxWidth(GuiDirecotryMaxSize));
-
-					// IPackRule
-					{
-						int index = PackRuleNameToIndex(packRuleName);
-						int newIndex = EditorGUILayout.Popup(index, _packRuleArray, GUILayout.MinWidth(GuiPackRuleSize), GUILayout.MaxWidth(GuiPackRuleSize));
-						if (newIndex != index)
-						{
-							packRuleName = IndexToPackRuleName(newIndex);
-							AssetBundleCollectorSettingData.ModifyCollector(directory, packRuleName, filterRuleName, dontWriteAssetPath, assetTags);
-						}
-					}
-
-					// IFilterRule
-					{
-						int index = FilterRuleNameToIndex(filterRuleName);
-						int newIndex = EditorGUILayout.Popup(index, _filterRuleArray, GUILayout.MinWidth(GuiFilterRuleSize), GUILayout.MaxWidth(GuiFilterRuleSize));
-						if (newIndex != index)
-						{
-							filterRuleName = IndexToFilterRuleName(newIndex);
-							AssetBundleCollectorSettingData.ModifyCollector(directory, packRuleName, filterRuleName, dontWriteAssetPath, assetTags);
-						}
-					}
-
-					// DontWriteAssetPath
-					{
-						bool newToggleValue = EditorGUILayout.Toggle(dontWriteAssetPath, GUILayout.MinWidth(GuiDontWriteAssetPathSize), GUILayout.MaxWidth(GuiDontWriteAssetPathSize));
-						if (newToggleValue != dontWriteAssetPath)
-						{
-							dontWriteAssetPath = newToggleValue;
-							AssetBundleCollectorSettingData.ModifyCollector(directory, packRuleName, filterRuleName, dontWriteAssetPath, assetTags);
-						}
-					}
-
-					// AssetTags
-					{
-						if (collector.DontWriteAssetPath)
-						{
-							EditorGUILayout.LabelField(assetTags, GUILayout.MinWidth(GuiAssetTagsMinSize), GUILayout.MaxWidth(GuiAssetTagsMaxSize));
-						}
-						else
-						{
-							string newTextValue = EditorGUILayout.TextField(assetTags, GUILayout.MinWidth(GuiAssetTagsMinSize), GUILayout.MaxWidth(GuiAssetTagsMaxSize));
-							if (newTextValue != assetTags)
-							{
-								assetTags = newTextValue;
-								AssetBundleCollectorSettingData.ModifyCollector(directory, packRuleName, filterRuleName, dontWriteAssetPath, assetTags);
-							}
-						}
-					}
-
-					if (GUILayout.Button("-", GUILayout.MinWidth(GuiBtnSize), GUILayout.MaxWidth(GuiBtnSize)))
-					{
-						AssetBundleCollectorSettingData.RemoveCollector(directory);
-						break;
-					}
-				}
-				EditorGUILayout.EndHorizontal();
-			}
-			EditorGUILayout.EndScrollView();
-
-			// 添加按钮
-			if (GUILayout.Button("+"))
-			{
-				string resultPath = EditorTools.OpenFolderPanel("Select Folder", _lastOpenFolderPath);
-				if (resultPath != null)
-				{
-					_lastOpenFolderPath = EditorTools.AbsolutePathToAssetPath(resultPath);
-					string defaultPackRuleName = nameof(PackExplicit);
-					string defaultFilterRuleName = nameof(CollectAll);
-					bool defaultDontWriteAssetPathValue = false;
-					string defaultAssetTag = string.Empty;
-					AssetBundleCollectorSettingData.AddCollector(_lastOpenFolderPath, defaultPackRuleName, defaultFilterRuleName, defaultDontWriteAssetPathValue, defaultAssetTag);
-				}
-			}
-
-			// 导入配置按钮
-			if (GUILayout.Button("Import Config"))
-			{
-				string resultPath = EditorTools.OpenFilePath("Select File", "Assets/", "xml");
-				if (resultPath != null)
-				{
-					CollectorConfigImporter.ImportXmlConfig(resultPath);
-				}
-			}
+			return 0;
 		}
 	}
 }
+#endif

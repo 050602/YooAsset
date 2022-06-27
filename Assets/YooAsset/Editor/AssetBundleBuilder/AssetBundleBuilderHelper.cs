@@ -18,33 +18,28 @@ namespace YooAsset.Editor
 		}
 
 		/// <summary>
+		/// 获取流文件夹路径
+		/// </summary>
+		public static string GetStreamingAssetsFolderPath()
+		{
+			return $"{Application.dataPath}/StreamingAssets/YooAssets/";
+		}
+
+		/// <summary>
 		/// 获取构建管线的输出目录
 		/// </summary>
 		public static string MakePipelineOutputDirectory(string outputRoot, BuildTarget buildTarget)
 		{
-			return $"{outputRoot}/{buildTarget}/{ResourceSettingData.Setting.UnityManifestFileName}";
+			return $"{outputRoot}/{buildTarget}/{YooAssetSettingsData.Setting.UnityManifestFileName}";
 		}
-
-		/// <summary>
-		/// 制作AssetBundle的完整名称
-		/// 注意：名称为全部小写并且包含后缀名
-		/// </summary>
-		public static string MakeBundleName(string bundleLabel, string bundleVariant)
-		{
-			if (string.IsNullOrEmpty(bundleVariant))
-				return bundleLabel.ToLower();
-			else
-				return $"{bundleLabel}.{bundleVariant}".ToLower();
-		}
-
 
 		/// <summary>
 		/// 清空流文件夹
 		/// </summary>
 		public static void ClearStreamingAssetsFolder()
 		{
-			string streamingPath = Application.dataPath + "/StreamingAssets";
-			EditorTools.ClearFolder(streamingPath);
+			string streamingFolderPath = GetStreamingAssetsFolderPath();
+			EditorTools.ClearFolder(streamingFolderPath);
 		}
 
 		/// <summary>
@@ -53,17 +48,17 @@ namespace YooAsset.Editor
 		/// </summary>
 		public static void DeleteStreamingAssetsIgnoreFiles()
 		{
-			string streamingPath = Application.dataPath + "/StreamingAssets";
-			if (Directory.Exists(streamingPath))
+			string streamingFolderPath = GetStreamingAssetsFolderPath();
+			if (Directory.Exists(streamingFolderPath))
 			{
-				string[] files = Directory.GetFiles(streamingPath, "*.manifest", SearchOption.AllDirectories);
+				string[] files = Directory.GetFiles(streamingFolderPath, "*.manifest", SearchOption.AllDirectories);
 				foreach (var file in files)
 				{
 					FileInfo info = new FileInfo(file);
 					info.Delete();
 				}
 
-				files = Directory.GetFiles(streamingPath, "*.meta", SearchOption.AllDirectories);
+				files = Directory.GetFiles(streamingFolderPath, "*.meta", SearchOption.AllDirectories);
 				foreach (var item in files)
 				{
 					FileInfo info = new FileInfo(item);
@@ -122,11 +117,11 @@ namespace YooAsset.Editor
 
 
 		/// <summary>
-		/// 从输出目录加载补丁清单文件
+		/// 加载补丁清单文件
 		/// </summary>
-		internal static PatchManifest LoadPatchManifestFile(string fileDirectory)
+		internal static PatchManifest LoadPatchManifestFile(string fileDirectory, int resourceVersion)
 		{
-			string filePath = $"{fileDirectory}/{ResourceSettingData.Setting.PatchManifestFileName}";
+			string filePath = $"{fileDirectory}/{YooAssetSettingsData.GetPatchManifestFileName(resourceVersion)}";
 			if (File.Exists(filePath) == false)
 			{
 				throw new System.Exception($"Not found patch manifest file : {filePath}");
@@ -134,6 +129,17 @@ namespace YooAsset.Editor
 
 			string jsonData = FileUtility.ReadFile(filePath);
 			return PatchManifest.Deserialize(jsonData);
+		}
+
+		/// <summary>
+		/// 获取旧的补丁清单
+		/// </summary>
+		internal static PatchManifest GetOldPatchManifest(string pipelineOutputDirectory)
+		{
+			string staticVersionFilePath = $"{pipelineOutputDirectory}/{YooAssetSettings.VersionFileName}";
+			string staticVersionContent = FileUtility.ReadFile(staticVersionFilePath);
+			int staticVersion = int.Parse(staticVersionContent);
+			return LoadPatchManifestFile(pipelineOutputDirectory, staticVersion);
 		}
 	}
 }

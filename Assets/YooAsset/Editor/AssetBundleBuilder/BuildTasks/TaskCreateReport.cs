@@ -1,51 +1,60 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using UnityEditor;
 
 namespace YooAsset.Editor
 {
-	/// <summary>
-	/// 创建报告文件
-	/// </summary>
+	[TaskAttribute("创建构建报告文件")]
 	public class TaskCreateReport : IBuildTask
 	{
 		void IBuildTask.Run(BuildContext context)
 		{
 			var buildParameters = context.GetContextObject<AssetBundleBuilder.BuildParametersContext>();
-			var buildMapContext = context.GetContextObject<TaskGetBuildMap.BuildMapContext>();
-			CreateReportFile(buildParameters, buildMapContext);
+			var buildMapContext = context.GetContextObject<BuildMapContext>();
+			buildParameters.StopWatch();
+
+			var buildMode = buildParameters.Parameters.BuildMode;
+			if (buildMode != EBuildMode.SimulateBuild)
+			{
+				CreateReportFile(buildParameters, buildMapContext);
+			}
+			else
+			{
+				float buildSeconds = buildParameters.GetBuildingSeconds();
+				BuildRunner.Info($"Build time consuming {buildSeconds} seconds.");
+			}
 		}
 
-		private void CreateReportFile(AssetBundleBuilder.BuildParametersContext buildParameters, TaskGetBuildMap.BuildMapContext buildMapContext)
+		private void CreateReportFile(AssetBundleBuilder.BuildParametersContext buildParameters, BuildMapContext buildMapContext)
 		{
-			PatchManifest patchManifest = AssetBundleBuilderHelper.LoadPatchManifestFile(buildParameters.PipelineOutputDirectory);
-			BuildReport buildReport = new BuildReport();
-			buildParameters.StopWatch();
+			PatchManifest patchManifest = AssetBundleBuilderHelper.LoadPatchManifestFile(buildParameters.PipelineOutputDirectory, buildParameters.Parameters.BuildVersion);
+			BuildReport buildReport = new BuildReport();		
 
 			// 概述信息
 			{
 				buildReport.Summary.UnityVersion = UnityEngine.Application.unityVersion;
 				buildReport.Summary.BuildTime = DateTime.Now.ToString();
-				buildReport.Summary.BuildSeconds = buildParameters.GetBuildingSeconds();
+				buildReport.Summary.BuildSeconds = (int)buildParameters.GetBuildingSeconds();
 				buildReport.Summary.BuildTarget = buildParameters.Parameters.BuildTarget;
+				buildReport.Summary.BuildMode = buildParameters.Parameters.BuildMode;
 				buildReport.Summary.BuildVersion = buildParameters.Parameters.BuildVersion;
-				buildReport.Summary.EnableAutoCollect = buildParameters.Parameters.EnableAutoCollect;
+				buildReport.Summary.BuildinTags = buildParameters.Parameters.BuildinTags;
+				buildReport.Summary.EnableAddressable = buildParameters.Parameters.EnableAddressable;
 				buildReport.Summary.AppendFileExtension = buildParameters.Parameters.AppendFileExtension;
+				buildReport.Summary.CopyBuildinTagFiles = buildParameters.Parameters.CopyBuildinTagFiles;
 				buildReport.Summary.AutoCollectShaders = AssetBundleCollectorSettingData.Setting.AutoCollectShaders;
 				buildReport.Summary.ShadersBundleName = AssetBundleCollectorSettingData.Setting.ShadersBundleName;
+				buildReport.Summary.EncryptionServicesClassName = buildParameters.Parameters.EncryptionServices == null ?
+					"null" : buildParameters.Parameters.EncryptionServices.GetType().FullName;
 
 				// 构建参数
-				buildReport.Summary.ForceRebuild = buildParameters.Parameters.ForceRebuild;
-				buildReport.Summary.BuildinTags = buildParameters.Parameters.BuildinTags;
 				buildReport.Summary.CompressOption = buildParameters.Parameters.CompressOption;
-				buildReport.Summary.AppendHash = buildParameters.Parameters.AppendHash;
 				buildReport.Summary.DisableWriteTypeTree = buildParameters.Parameters.DisableWriteTypeTree;
 				buildReport.Summary.IgnoreTypeTreeChanges = buildParameters.Parameters.IgnoreTypeTreeChanges;
-				buildReport.Summary.DisableLoadAssetByFileName = buildParameters.Parameters.DisableLoadAssetByFileName;
 
 				// 构建结果
 				buildReport.Summary.AssetFileTotalCount = buildMapContext.AssetFileCount;
-				buildReport.Summary.RedundancyAssetFileCount = buildMapContext.RedundancyAssetList.Count;
 				buildReport.Summary.AllBundleTotalCount = GetAllBundleCount(patchManifest);
 				buildReport.Summary.AllBundleTotalSize = GetAllBundleSize(patchManifest);
 				buildReport.Summary.BuildinBundleTotalCount = GetBuildinBundleCount(patchManifest);
@@ -54,8 +63,6 @@ namespace YooAsset.Editor
 				buildReport.Summary.EncryptedBundleTotalSize = GetEncryptedBundleSize(patchManifest);
 				buildReport.Summary.RawBundleTotalCount = GetRawBundleCount(patchManifest);
 				buildReport.Summary.RawBundleTotalSize = GetRawBundleSize(patchManifest);
-
-
 			}
 
 			// 资源对象列表
@@ -64,8 +71,12 @@ namespace YooAsset.Editor
 			{
 				var mainBundle = patchManifest.BundleList[patchAsset.BundleID];
 				ReportAssetInfo reportAssetInfo = new ReportAssetInfo();
+				reportAssetInfo.Address = patchAsset.Address;
 				reportAssetInfo.AssetPath = patchAsset.AssetPath;
-				reportAssetInfo.MainBundle = mainBundle.BundleName;
+				reportAssetInfo.AssetTags = patchAsset.AssetTags;
+				reportAssetInfo.AssetGUID = AssetDatabase.AssetPathToGUID(patchAsset.AssetPath);
+				reportAssetInfo.MainBundleName = mainBundle.BundleName;
+				reportAssetInfo.MainBundleSize = mainBundle.SizeBytes;
 				reportAssetInfo.DependBundles = GetDependBundles(patchManifest, patchAsset);
 				reportAssetInfo.DependAssets = GetDependAssets(buildMapContext, mainBundle.BundleName, patchAsset.AssetPath);
 				buildReport.AssetInfos.Add(reportAssetInfo);
@@ -80,33 +91,19 @@ namespace YooAsset.Editor
 				reportBundleInfo.Hash = patchBundle.Hash;
 				reportBundleInfo.CRC = patchBundle.CRC;
 				reportBundleInfo.SizeBytes = patchBundle.SizeBytes;
-				reportBundleInfo.Version = patchBundle.Version;
 				reportBundleInfo.Tags = patchBundle.Tags;
 				reportBundleInfo.Flags = patchBundle.Flags;
 				buildReport.BundleInfos.Add(reportBundleInfo);
 			}
 
-			// 收集器列表
-			for (int i = 0; i < AssetBundleCollectorSettingData.Setting.Collectors.Count; i++)
-			{
-				var wrapper = AssetBundleCollectorSettingData.Setting.Collectors[i];
-				buildReport.CollectorInfoList.Add(wrapper.ToString());
-			}
-
-			// 冗余资源列表
-			for (int i = 0; i < buildMapContext.RedundancyAssetList.Count; i++)
-			{
-				string redundancyAssetPath = buildMapContext.RedundancyAssetList[i];
-				buildReport.RedundancyAssetList.Add(redundancyAssetPath);
-			}
-
 			// 删除旧文件
-			string filePath = $"{buildParameters.PipelineOutputDirectory}/{ResourceSettingData.Setting.ReportFileName}";
+			string filePath = $"{buildParameters.PipelineOutputDirectory}/{YooAssetSettingsData.GetReportFileName(buildParameters.Parameters.BuildVersion)}";
 			if (File.Exists(filePath))
 				File.Delete(filePath);
 
 			// 序列化文件
 			BuildReport.Serialize(filePath, buildReport);
+			BuildRunner.Log($"资源构建报告文件创建完成：{filePath}");
 		}
 
 		/// <summary>
@@ -126,7 +123,7 @@ namespace YooAsset.Editor
 		/// <summary>
 		/// 获取资源对象依赖的其它所有资源
 		/// </summary>
-		private List<string> GetDependAssets(TaskGetBuildMap.BuildMapContext buildMapContext, string bundleName, string assetPath)
+		private List<string> GetDependAssets(BuildMapContext buildMapContext, string bundleName, string assetPath)
 		{
 			List<string> result = new List<string>();
 			if (buildMapContext.TryGetBundleInfo(bundleName, out BuildBundleInfo bundleInfo))

@@ -1,19 +1,27 @@
 ﻿
 namespace YooAsset
 {
-	public class BundleInfo
+	internal class BundleInfo
 	{
+		public enum ELoadMode
+		{
+			None,
+			LoadFromStreaming,
+			LoadFromCache,
+			LoadFromRemote,
+			LoadFromEditor,
+		}
+
 		private readonly PatchBundle _patchBundle;
-		
+		public readonly ELoadMode LoadMode;
+
+		private string _streamingPath;
+		private string _cachePath;
+
 		/// <summary>
 		/// 资源包名称
 		/// </summary>
 		public string BundleName { private set; get; }
-
-		/// <summary>
-		/// 本地存储的路径
-		/// </summary>
-		public string LocalPath { private set; get; }
 
 		/// <summary>
 		/// 远端下载地址
@@ -24,6 +32,11 @@ namespace YooAsset
 		/// 远端下载备用地址
 		/// </summary>
 		public string RemoteFallbackURL { private set; get; }
+
+		/// <summary>
+		/// 编辑器资源路径
+		/// </summary>
+		public string EditorAssetPath { private set; get; }
 
 		/// <summary>
 		/// 文件哈希值
@@ -68,20 +81,6 @@ namespace YooAsset
 		}
 
 		/// <summary>
-		/// 资源版本
-		/// </summary>
-		public int Version
-		{
-			get
-			{
-				if (_patchBundle == null)
-					return 0;
-				else
-					return _patchBundle.Version;
-			}
-		}
-
-		/// <summary>
 		/// 是否为加密文件
 		/// </summary>
 		public bool IsEncrypted
@@ -109,41 +108,99 @@ namespace YooAsset
 			}
 		}
 
+		/// <summary>
+		/// 身份是否无效
+		/// </summary>
+		public bool IsInvalid
+		{
+			get
+			{
+				return _patchBundle == null;
+			}
+		}
+
+		/// <summary>
+		/// 错误信息
+		/// </summary>
+		public string Error { private set; get; }
+
 
 		private BundleInfo()
 		{
 		}
-		internal BundleInfo(PatchBundle patchBundle, string localPath, string mainURL, string fallbackURL)
+		public BundleInfo(PatchBundle patchBundle, ELoadMode loadMode, string mainURL, string fallbackURL)
 		{
 			_patchBundle = patchBundle;
+			LoadMode = loadMode;
 			BundleName = patchBundle.BundleName;
-			LocalPath = localPath;
 			RemoteMainURL = mainURL;
 			RemoteFallbackURL = fallbackURL;
+			EditorAssetPath = string.Empty;
+			Error = string.Empty;
 		}
-		internal BundleInfo(PatchBundle patchBundle, string localPath)
+		public BundleInfo(PatchBundle patchBundle, ELoadMode loadMode, string editorAssetPath)
 		{
 			_patchBundle = patchBundle;
+			LoadMode = loadMode;
 			BundleName = patchBundle.BundleName;
-			LocalPath = localPath;
 			RemoteMainURL = string.Empty;
 			RemoteFallbackURL = string.Empty;
+			EditorAssetPath = editorAssetPath;
+			Error = string.Empty;
 		}
-		internal BundleInfo(string bundleName, string localPath)
+		public BundleInfo(PatchBundle patchBundle, ELoadMode loadMode)
+		{
+			_patchBundle = patchBundle;
+			LoadMode = loadMode;
+			BundleName = patchBundle.BundleName;
+			RemoteMainURL = string.Empty;
+			RemoteFallbackURL = string.Empty;
+			EditorAssetPath = string.Empty;
+			Error = string.Empty;
+		}
+		public BundleInfo(string error)
 		{
 			_patchBundle = null;
-			BundleName = bundleName;
-			LocalPath = localPath;
+			LoadMode = ELoadMode.None;
+			BundleName = string.Empty;
 			RemoteMainURL = string.Empty;
 			RemoteFallbackURL = string.Empty;
+			EditorAssetPath = string.Empty;
+			Error = error;
+		}
+
+		/// <summary>
+		/// 获取流文件夹的加载路径
+		/// </summary>
+		public string GetStreamingLoadPath()
+		{
+			if (_patchBundle == null)
+				return string.Empty;
+
+			if (string.IsNullOrEmpty(_streamingPath))
+				_streamingPath = PathHelper.MakeStreamingLoadPath(_patchBundle.Hash);
+			return _streamingPath;
+		}
+
+		/// <summary>
+		/// 获取缓存文件夹的加载路径
+		/// </summary>
+		public string GetCacheLoadPath()
+		{
+			if (_patchBundle == null)
+				return string.Empty;
+
+			if (string.IsNullOrEmpty(_cachePath))
+				_cachePath = SandboxHelper.MakeCacheFilePath(_patchBundle.Hash);
+			return _cachePath;
 		}
 
 		/// <summary>
 		/// 是否为JAR包内文件
 		/// </summary>
-		public bool IsBuildinJarFile()
+		public static bool IsBuildinJarFile(string streamingPath)
 		{
-			return LocalPath.StartsWith("jar:");
+			return streamingPath.StartsWith("jar:");
 		}
 	}
 }

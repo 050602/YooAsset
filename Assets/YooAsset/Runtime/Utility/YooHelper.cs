@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Collections.Generic;
 
 namespace YooAsset
 {
@@ -29,7 +30,7 @@ namespace YooAsset
 		/// </summary>
 		public static string MakeStreamingLoadPath(string path)
 		{
-			return StringUtility.Format("{0}/{1}", UnityEngine.Application.streamingAssetsPath, path);
+			return StringUtility.Format("{0}/YooAssets/{1}", UnityEngine.Application.streamingAssetsPath, path);
 		}
 
 		/// <summary>
@@ -60,7 +61,6 @@ namespace YooAsset
 		/// </summary>
 		public static string ConvertToWWWPath(string path)
 		{
-			// 注意：WWW加载方式，必须要在路径前面加file://
 #if UNITY_EDITOR
 			return StringUtility.Format("file:///{0}", path);
 #elif UNITY_IPHONE
@@ -69,56 +69,8 @@ namespace YooAsset
 			return path;
 #elif UNITY_STANDALONE
 			return StringUtility.Format("file:///{0}", path);
-#endif
-		}
-
-		/// <summary>
-		/// 合并资源路径
-		/// </summary>
-		public static string CombineAssetPath(string root, string location)
-		{
-			if (string.IsNullOrEmpty(root))
-				return location;
-			else
-				return $"{root}/{location}";
-		}
-
-		/// <summary>
-		/// 获取AssetDatabase的加载路径
-		/// </summary>
-		public static string FindDatabaseAssetPath(string filePath)
-		{
-#if UNITY_EDITOR
-			if (File.Exists(filePath))
-				return filePath;
-
-			// AssetDatabase加载资源需要提供文件后缀格式，然而资源定位地址并没有文件格式信息。
-			// 所以我们通过查找该文件所在文件夹内同名的首个文件来确定AssetDatabase的加载路径。
-			// 注意：AssetDatabase.FindAssets() 返回文件内包括递归文件夹内所有资源的GUID
-			string fileName = Path.GetFileName(filePath);
-			string directory = GetDirectory(filePath);
-			string[] guids = UnityEditor.AssetDatabase.FindAssets(string.Empty, new[] { directory });
-			for (int i = 0; i < guids.Length; i++)
-			{
-				string assetPath = UnityEditor.AssetDatabase.GUIDToAssetPath(guids[i]);
-
-				if (UnityEditor.AssetDatabase.IsValidFolder(assetPath))
-					continue;
-
-				string assetDirectory = GetDirectory(assetPath);
-				if (assetDirectory != directory)
-					continue;
-
-				string assetName = Path.GetFileNameWithoutExtension(assetPath);
-				if (assetName == fileName)
-					return assetPath;
-			}
-
-			// 没有找到同名的资源文件
-			YooLogger.Warning($"Not found asset : {filePath}");
-			return filePath;
-#else
-			throw new System.NotImplementedException();
+#elif UNITY_WEBGL
+			return path;
 #endif
 		}
 	}
@@ -128,13 +80,12 @@ namespace YooAsset
 	/// </summary>
 	internal static class SandboxHelper
 	{
-		private const string StrCacheFileName = "Cache.bytes";
-		private const string StrCacheFolderName = "CacheFiles";
+		private const string CacheFolderName = "CacheFiles";
 
 		/// <summary>
-		/// 清空沙盒目录
+		/// 删除沙盒总目录
 		/// </summary>
-		public static void ClearSandbox()
+		public static void DeleteSandbox()
 		{
 			string directoryPath = PathHelper.MakePersistentLoadPath(string.Empty);
 			if (Directory.Exists(directoryPath))
@@ -142,82 +93,52 @@ namespace YooAsset
 		}
 
 		/// <summary>
-		/// 删除沙盒内补丁清单文件
-		/// </summary>
-		public static void DeleteSandboxPatchManifestFile()
-		{
-			string filePath = PathHelper.MakePersistentLoadPath(ResourceSettingData.Setting.PatchManifestFileName);
-			if (File.Exists(filePath))
-				File.Delete(filePath);
-		}
-
-		/// <summary>
-		/// 删除沙盒内的缓存文件
-		/// </summary>
-		public static void DeleteSandboxCacheFile()
-		{
-			string filePath = GetSandboxCacheFilePath();
-			if (File.Exists(filePath))
-				File.Delete(filePath);
-		}
-
-		/// <summary>
 		/// 删除沙盒内的缓存文件夹
 		/// </summary>
-		public static void DeleteSandboxCacheFolder()
+		public static void DeleteCacheFolder()
 		{
-			string directoryPath = PathHelper.MakePersistentLoadPath(StrCacheFolderName);
+			string directoryPath = GetCacheFolderPath();
 			if (Directory.Exists(directoryPath))
 				Directory.Delete(directoryPath, true);
 		}
 
-
 		/// <summary>
-		/// 获取沙盒内缓存文件的路径
+		/// 获取缓存文件夹路径
 		/// </summary>
-		public static string GetSandboxCacheFilePath()
+		public static string GetCacheFolderPath()
 		{
-			return PathHelper.MakePersistentLoadPath(StrCacheFileName);
-		}
-
-		/// <summary>
-		/// 检测沙盒内缓存文件是否存在
-		/// </summary>
-		public static bool CheckSandboxCacheFileExist()
-		{
-			string filePath = GetSandboxCacheFilePath();
-			return File.Exists(filePath);
-		}
-
-		/// <summary>
-		/// 检测沙盒内补丁清单文件是否存在
-		/// </summary>
-		public static bool CheckSandboxPatchManifestFileExist()
-		{
-			string filePath = PathHelper.MakePersistentLoadPath(ResourceSettingData.Setting.PatchManifestFileName);
-			return File.Exists(filePath);
-		}
-
-		/// <summary>
-		/// 获取沙盒内补丁清单文件的哈希值
-		/// 注意：如果沙盒内补丁清单文件不存在，返回空字符串
-		/// </summary>
-		/// <returns></returns>
-		public static string GetSandboxPatchManifestFileHash()
-		{
-			string filePath = PathHelper.MakePersistentLoadPath(ResourceSettingData.Setting.PatchManifestFileName);
-			if (File.Exists(filePath))
-				return HashUtility.FileMD5(filePath);
-			else
-				return string.Empty;
+			return PathHelper.MakePersistentLoadPath(CacheFolderName);
 		}
 
 		/// <summary>
 		/// 获取缓存文件的存储路径
 		/// </summary>
-		public static string MakeSandboxCacheFilePath(string fileName)
+		public static string MakeCacheFilePath(string fileName)
 		{
-			return PathHelper.MakePersistentLoadPath($"{StrCacheFolderName}/{fileName}");
+			return PathHelper.MakePersistentLoadPath($"{CacheFolderName}/{fileName}");
+		}
+	}
+
+	/// <summary>
+	/// 补丁包帮助类
+	/// </summary>
+	internal static class PatchHelper
+	{
+		/// <summary>
+		/// 获取资源信息列表
+		/// </summary>
+		public static AssetInfo[] GetAssetsInfoByTags(PatchManifest patchManifest, string[] tags)
+		{
+			List<AssetInfo> result = new List<AssetInfo>(100);
+			foreach (var patchAsset in patchManifest.AssetList)
+			{
+				if(patchAsset.HasTag(tags))
+				{
+					AssetInfo assetInfo = new AssetInfo(patchAsset);
+					result.Add(assetInfo);
+				}
+			}
+			return result.ToArray();
 		}
 	}
 }

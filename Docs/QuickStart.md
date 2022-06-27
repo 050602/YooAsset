@@ -1,20 +1,59 @@
 # 快速开始
 
-**下载安装**
+#### **下载安装**
 
-1. 通过OpenUPM安装
-2. 通过Packages安装
-3. 通过GIT安装
+1. **通过PackageManager安装**
 
-**系统需求**
+   打开管理界面 **Edit/Project Settings/Package Manager**
 
-支持版本: Unity2018.4+
+   ````
+   // 输入以下内容
+   Name: package.openupm.cn
+   URL: https://package.openupm.cn
+   Scope(s): com.tuyoogame.yooasset
+   ````
+
+   ![image](https://github.com/tuyoogame/YooAsset/raw/main/Docs/Image/QuickStart-img1.jpg)
+
+   打开管理界面 **Edit/Windows/Package Manager**
+
+   ![image](https://github.com/tuyoogame/YooAsset/raw/main/Docs/Image/QuickStart-img2.jpg)
+
+2. **通过Packages清单安装**
+
+   直接修改Packages文件夹下的清单文件manifest.json
+
+   ````json
+   {
+     "dependencies": {
+       "com.tuyoogame.yooasset": "0.0.1-preview",
+       ......
+     },
+     "scopedRegistries": [
+       {
+         "name": "package.openupm.cn",
+         "url": "https://package.openupm.cn",
+         "scopes": [
+           "com.tuyoogame.yooasset"
+         ]
+       }
+     ]
+   }
+   ````
+
+3. **通过Github下载安装**
+
+   在发布的Release版本中，选择最新版本下载Source Code压缩包。
+
+#### **系统需求**
+
+支持版本: Unity2019.4+
 
 支持平台: Windows、OSX、Android、iOS
 
 开发环境: .NET4.x
 
-**目录结构**
+#### **目录结构**
 
 ````
 Assets

@@ -26,7 +26,12 @@ namespace YooAsset.Editor
 			public BuildParametersContext(BuildParameters parameters)
 			{
 				Parameters = parameters;
+
 				PipelineOutputDirectory = AssetBundleBuilderHelper.MakePipelineOutputDirectory(parameters.OutputRoot, parameters.BuildTarget);
+				if (parameters.BuildMode == EBuildMode.DryRunBuild)
+					PipelineOutputDirectory += $"_{EBuildMode.DryRunBuild}";
+				else if (parameters.BuildMode == EBuildMode.SimulateBuild)
+					PipelineOutputDirectory += $"_{EBuildMode.SimulateBuild}";
 			}
 
 			/// <summary>
@@ -48,24 +53,29 @@ namespace YooAsset.Editor
 				BuildAssetBundleOptions opt = BuildAssetBundleOptions.None;
 				opt |= BuildAssetBundleOptions.StrictMode; //Do not allow the build to succeed if any errors are reporting during it.
 
+				if (Parameters.BuildMode == EBuildMode.SimulateBuild)
+					throw new Exception("Should never get here !");
+
+				if (Parameters.BuildMode == EBuildMode.DryRunBuild)
+				{
+					opt |= BuildAssetBundleOptions.DryRunBuild;
+					return opt;
+				}
+
 				if (Parameters.CompressOption == ECompressOption.Uncompressed)
 					opt |= BuildAssetBundleOptions.UncompressedAssetBundle;
 				else if (Parameters.CompressOption == ECompressOption.LZ4)
 					opt |= BuildAssetBundleOptions.ChunkBasedCompression;
 
-				if (Parameters.ForceRebuild)
+				if (Parameters.BuildMode == EBuildMode.ForceRebuild)
 					opt |= BuildAssetBundleOptions.ForceRebuildAssetBundle; //Force rebuild the asset bundles
-				if (Parameters.AppendHash)
-					opt |= BuildAssetBundleOptions.AppendHashToAssetBundleName; //Append the hash to the assetBundle name
 				if (Parameters.DisableWriteTypeTree)
 					opt |= BuildAssetBundleOptions.DisableWriteTypeTree; //Do not include type information within the asset bundle (don't write type tree).
 				if (Parameters.IgnoreTypeTreeChanges)
 					opt |= BuildAssetBundleOptions.IgnoreTypeTreeChanges; //Ignore the type tree changes when doing the incremental build check.
-				if (Parameters.DisableLoadAssetByFileName)
-				{
-					opt |= BuildAssetBundleOptions.DisableLoadAssetByFileName; //Disables Asset Bundle LoadAsset by file name.
-					opt |= BuildAssetBundleOptions.DisableLoadAssetByFileNameWithExtension; //Disables Asset Bundle LoadAsset by file name with extension.
-				}
+
+				opt |= BuildAssetBundleOptions.DisableLoadAssetByFileName; //Disables Asset Bundle LoadAsset by file name.
+				opt |= BuildAssetBundleOptions.DisableLoadAssetByFileNameWithExtension; //Disables Asset Bundle LoadAsset by file name with extension.			
 
 				return opt;
 			}
@@ -73,9 +83,9 @@ namespace YooAsset.Editor
 			/// <summary>
 			/// 获取构建的耗时（单位：秒）
 			/// </summary>
-			public int GetBuildingSeconds()
+			public float GetBuildingSeconds()
 			{
-				int seconds = (int)(_buildWatch.ElapsedMilliseconds / 1000);
+				float seconds = _buildWatch.ElapsedMilliseconds / 1000f;
 				return seconds;
 			}
 			public void BeginWatch()
@@ -107,7 +117,8 @@ namespace YooAsset.Editor
 			{
 				new TaskPrepare(), //前期准备工作
 				new TaskGetBuildMap(), //获取构建列表
-				new TaskBuilding(), //开始执行构建			
+				new TaskBuilding(), //开始执行构建
+				new TaskVerifyBuildResult(), //验证构建结果
 				new TaskEncryption(), //加密资源文件
 				new TaskCreatePatchManifest(), //创建清单文件
 				new TaskCreateReport(), //创建报告文件
@@ -115,11 +126,16 @@ namespace YooAsset.Editor
 				new TaskCopyBuildinFiles(), //拷贝内置文件
 			};
 
+			if (buildParameters.BuildMode == EBuildMode.SimulateBuild)
+				BuildRunner.EnableLog = false;
+			else
+				BuildRunner.EnableLog = true;
+
 			bool succeed = BuildRunner.Run(pipeline, _buildContext);
 			if (succeed)
-				Debug.Log($"构建成功！");
+				Debug.Log($"{buildParameters.BuildMode} pipeline build succeed !");
 			else
-				Debug.LogWarning($"构建失败！");
+				Debug.LogWarning($"{buildParameters.BuildMode} pipeline build failed !");
 			return succeed;
 		}
 	}

@@ -6,6 +6,7 @@ using System.Collections.Generic;
 
 namespace YooAsset.Editor
 {
+	[TaskAttribute("资源包加密")]
 	public class TaskEncryption : IBuildTask
 	{
 		public class EncryptionContext : IContextObject
@@ -24,61 +25,58 @@ namespace YooAsset.Editor
 		void IBuildTask.Run(BuildContext context)
 		{
 			var buildParameters = context.GetContextObject<AssetBundleBuilder.BuildParametersContext>();
-			var buildMapContext = context.GetContextObject<TaskGetBuildMap.BuildMapContext>();
+			var buildMapContext = context.GetContextObject<BuildMapContext>();
 
-			var encrypter = CreateAssetEncrypter();
-			List<string> encryptList = EncryptFiles(encrypter, buildParameters, buildMapContext);
-
-			EncryptionContext encryptionContext = new EncryptionContext();
-			encryptionContext.EncryptList = encryptList;
-			context.SetContextObject(encryptionContext);
-		}
-
-		/// <summary>
-		/// 创建加密类
-		/// </summary>
-		/// <returns>如果没有定义类型，则返回NULL</returns>
-		private IAssetEncrypter CreateAssetEncrypter()
-		{
-			var types = AssemblyUtility.GetAssignableTypes(AssemblyUtility.UnityDefaultAssemblyEditorName, typeof(IAssetEncrypter));
-			if (types.Count == 0)
-				return null;
-			if (types.Count != 1)
-				throw new Exception($"Found more {nameof(IAssetEncrypter)} types. We only support one.");
-
-			UnityEngine.Debug.Log($"创建实例类 : {types[0].FullName}");
-			return (IAssetEncrypter)Activator.CreateInstance(types[0]);
+			var buildMode = buildParameters.Parameters.BuildMode;
+			if (buildMode == EBuildMode.ForceRebuild || buildMode == EBuildMode.IncrementalBuild)
+			{
+				EncryptionContext encryptionContext = new EncryptionContext();
+				encryptionContext.EncryptList = EncryptFiles(buildParameters, buildMapContext);
+				context.SetContextObject(encryptionContext);
+			}
+			else
+			{
+				EncryptionContext encryptionContext = new EncryptionContext();
+				encryptionContext.EncryptList = new List<string>();
+				context.SetContextObject(encryptionContext);
+			}
 		}
 
 		/// <summary>
 		/// 加密文件
 		/// </summary>
-		private List<string> EncryptFiles(IAssetEncrypter encrypter, AssetBundleBuilder.BuildParametersContext buildParameters, TaskGetBuildMap.BuildMapContext buildMapContext)
+		private List<string> EncryptFiles(AssetBundleBuilder.BuildParametersContext buildParameters, BuildMapContext buildMapContext)
 		{
+			var encryptionServices = buildParameters.Parameters.EncryptionServices;
+
 			// 加密资源列表
 			List<string> encryptList = new List<string>();
 
 			// 如果没有设置加密类
-			if (encrypter == null)
+			if (encryptionServices == null)
 				return encryptList;
 
-			UnityEngine.Debug.Log($"开始加密资源文件");
 			int progressValue = 0;
 			foreach (var bundleInfo in buildMapContext.BundleInfos)
 			{
-				var bundleName = bundleInfo.BundleName;
-				string filePath = $"{buildParameters.PipelineOutputDirectory}/{bundleName}";
-				if (encrypter.Check(filePath))
+				if (encryptionServices.Check(bundleInfo.BundleName))
 				{
-					encryptList.Add(bundleName);
+					if (bundleInfo.IsRawFile)
+					{
+						UnityEngine.Debug.LogWarning($"Encryption not support raw file : {bundleInfo.BundleName}");
+						continue;
+					}
+
+					encryptList.Add(bundleInfo.BundleName);
 
 					// 注意：通过判断文件合法性，规避重复加密一个文件
+					string filePath = $"{buildParameters.PipelineOutputDirectory}/{bundleInfo.BundleName}";
 					byte[] fileData = File.ReadAllBytes(filePath);
 					if (EditorTools.CheckBundleFileValid(fileData))
 					{
-						byte[] bytes = encrypter.Encrypt(fileData);
+						byte[] bytes = encryptionServices.Encrypt(fileData);
 						File.WriteAllBytes(filePath, bytes);
-						UnityEngine.Debug.Log($"文件加密完成：{filePath}");
+						BuildRunner.Log($"文件加密完成：{filePath}");
 					}
 				}
 
@@ -87,6 +85,8 @@ namespace YooAsset.Editor
 			}
 			EditorTools.ClearProgressBar();
 
+			if(encryptList.Count == 0)
+				UnityEngine.Debug.LogWarning($"没有发现需要加密的文件！");
 			return encryptList;
 		}
 	}

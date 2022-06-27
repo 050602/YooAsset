@@ -1,14 +1,25 @@
 # 资源加载
 
-在加载资源对象的时候只需要提供相对路径，统一约定该相对路径名称为：location
+加载方法：
 
-资源加载接口：
+- YooAssets.LoadAssetSync() 同步加载资源对象
+- YooAssets.LoadAssetAsync() 异步加载资源对象
+- YooAssets.LoadSubAssetsSync() 同步加载子资源对象
+- YooAssets.LoadSubAssetsAsync() 异步加载子资源对象
+- YooAssets.LoadSceneAsync() 异步加载场景
+- YooAssets.GetRawFileAsync() 异步获取原生文件
 
-- YooAssets.LoadAssetSync() 同步加载资源对象接口
-- YooAssets.LoadSubAssetsSync() 同步加载子资源对象接口
-- YooAssets.LoadAssetAsync() 异步加载资源对象接口
-- YooAssets.LoadSubAssetsAsync() 异步加载子资源对象接口
-- YooAssets.LoadSceneAsync() 异步加载场景接口
+**统一约定**
+
+location为资源的定位地址，也是加载资源对象的唯一标识符。
+
+- DefaultLocationServices 默认资源定位服务，location代表的是资源对象的相对路径。
+
+
+- AddressLocationServices 可寻址资源定位服务，location代表的是资源对象可寻址地址。
+
+
+**注意**：以下范例执行环境是在DefaultLocationServices下。
 
 **加载路径的匹配方式**
 
@@ -36,11 +47,7 @@ void Handle_Completed(AssetOperationHandle handle)
 ````
 ````C#
 // 协程加载方式
-void Start()
-{
-    this.StartCoroutine(AsyncLoad());
-}
-IEnumerator AsyncLoad()
+IEnumerator Start()
 {
     AssetOperationHandle handle = YooAssets.LoadAssetAsync<AudioClip>("Audio/bgMusic.mp3");
     yield return handle;   
@@ -51,10 +58,6 @@ IEnumerator AsyncLoad()
 // Task加载方式
 async void Start()
 {
-    await AsyncLoad();
-}
-async Task AsyncLoad()
-{
     AssetOperationHandle handle = YooAssets.LoadAssetAsync<AudioClip>("Audio/bgMusic.mp3");
     await handle.Task;
     AudioClip audioClip = handle.AssetObject as AudioClip;	
@@ -64,54 +67,66 @@ async Task AsyncLoad()
 **资源卸载范例**
 
 ````C#
-void Start()
+IEnumerator Start()
 {
     AssetOperationHandle handle = YooAssets.LoadAssetAsync<AudioClip>("Audio/bgMusic.mp3");
-
+    yield return handle;
     ...
-
     handle.Release();
 }
 ````
 
-**预制体同步加载范例**
+**资源释放范例**
 
-````C#
-var handle = YooAssets.LoadAssetSync<GameObject>(location);
-GameObject go = handle.InstantiateObject;
-````
+可以在切换场景之后调用资源释放方法或者写定时器间隔时间去释放。
+
+注意：只有调用资源释放方法，资源对象才会在内存里被移除。
 
 ````c#
-var handle = YooAssets.LoadAssetSync<GameObject>(location);
-GameObject go = UnityEngine.Object.Instantiate(handle.AssetObject as GameObject);
+private void UnloadAssets()
+{
+    YooAssets.UnloadUnusedAssets();
+}
 ````
 
-**子对象同步加载范例**
+**预制体加载范例**
+
+````C#
+IEnumerator Start()
+{
+    AssetOperationHandle handle = YooAssets.LoadAssetAsync<GameObject>("Panel/login.prefab");
+    yield return handle;
+    GameObject go = handle.InstantiateSync();
+    Debug.Log($"Prefab name is {go.name}");
+}
+````
+
+**子对象加载范例**
 
 例如：通过TexturePacker创建的图集，如果需要访问图集的精灵对象，可以通过子对象加载接口。
 
 ````c#
-var handle = YooAssets.LoadSubAssetsSync<Sprite>(location);
-foreach (var asset in handle.AllAssets)
+IEnumerator Start()
 {
-    Debug.Log($"Sprite name is {asset.name}");
+    SubAssetsOperationHandle handle = YooAssets.LoadSubAssetsAsync<Sprite>(location);
+    yield return handle;
+    var sprite = handle.GetSubAssetObject<Sprite>("spriteName");
+    Debug.Log($"Sprite name is {sprite.name}");
 }
 ````
 
 **场景异步加载范例**
 
+注意：当加载新的主场景的时候，会自动释放之前加载的主场景以及附加场景。
+
 ````c#
-void Start()
+IEnumerator Start()
 {
     var sceneMode = UnityEngine.SceneManagement.LoadSceneMode.Single;
     bool activateOnLoad = true;
-
     SceneOperationHandle handle = YooAssets.LoadSceneAsync("Scene/Login", sceneMode, activateOnLoad);
-    handle.Completed += Handle_Completed;
-}
-void Handle_Completed(SceneOperationHandle handle)
-{
-    Debug.Log(handle.Scene.name);
+    yield return handle;
+    Debug.Log($"Scene name is {handle.Scene.name}");
 }
 ````
 
@@ -120,24 +135,64 @@ void Handle_Completed(SceneOperationHandle handle)
 例如：wwise的初始化文件
 
 ````c#
-void Start()
+IEnumerator Start()
 {
-    //获取资源包信息
     string location = "wwise/init.bnk";
-    BundleInfo bundleInfo = YooAssets.GetBundleInfo(location);
-    
-    //文件路径
-    string fileSourcePath = bundleInfo.LocalPath;
-    string fileDestPath = $"{Application.persistentDataPath}/Audio/init.bnk";
-    
-    //拷贝文件
-    File.Copy(fileSourcePath, fileDestPath, true);
-    
-    //注意：在安卓平台下，可以通过如下方法判断文件是否在APK内部。
-    if(bundleInfo.IsBuildinJarFile())
+    string copyPath = $"{Application.persistentDataPath}/Audio/init.bnk";
+    RawFileOperation operation = YooAssets.GetRawFileAsync(location, copyPath);
+    yield return operation;
+    byte[] fileData = operation.GetFileData();
+    string fileText = operation.GetFileText();
+}
+````
+
+**获取资源信息列表**
+
+通过资源标签来获取资源信息列表。
+
+````c#
+private GetAssetInfosByTag(string tag)
+{
+    AssetInfo[] assetInfos = YooAssets.GetAssetInfos(tag);
+    foreach (var assetInfo in assetInfos)
     {
-        ...
+        Debug.Log(assetInfo.AssetPath);
     }
 }
 ````
 
+**FairyGUI支持解决方案**
+
+注意：在FairyGUI的面板销毁的时候，将资源句柄列表释放，否则会造成资源泄漏。
+
+````c#
+// 资源句柄列表
+private List<AssetOperationHandle> _handles = new List<AssetOperationHandle>(100);
+
+// 加载方法
+private object LoadFunc(string name, string extension, System.Type type, out DestroyMethod method)
+{
+    method = DestroyMethod.None; //注意：这里一定要设置为None
+    string location = $"FairyRes/{name}{extension}";
+    var handle = YooAssets.LoadAssetSync(location , type);
+    _handles.Add(handle);
+    return handle.AssetObject;
+}
+
+// 执行FairyGUI的添加包函数
+UIPackage.AddPackage(name, LoadFunc);
+
+// 释放资源句柄列表
+private void ReleaseHandles()
+{
+    foreach(var handle in _handles)
+    {
+        handle.Release();
+    }
+    _handles.Clear();
+}
+````
+
+**UniTask支持解决方案**
+
+[解决方案](https://github.com/tuyoogame/YooAsset/blob/master/Assets/UniTask.YooAsset~/README.md)

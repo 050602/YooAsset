@@ -17,8 +17,7 @@ namespace YooAsset
 			}
 		}
 
-		public BundledSubAssetsProvider(string assetPath, System.Type assetType)
-			: base(assetPath, assetType)
+		public BundledSubAssetsProvider(AssetInfo assetInfo) : base(assetInfo)
 		{
 		}
 		public override void Update()
@@ -36,24 +35,32 @@ namespace YooAsset
 			{
 				if (IsWaitForAsyncComplete)
 				{
-					DependBundles.WaitForAsyncComplete();
+					DependBundleGroup.WaitForAsyncComplete();
 					OwnerBundle.WaitForAsyncComplete();
 				}
 
-				if (DependBundles.IsDone() == false)
+				if (DependBundleGroup.IsDone() == false)
 					return;
 				if (OwnerBundle.IsDone() == false)
 					return;
 
-				if (OwnerBundle.CacheBundle == null)
+				if (DependBundleGroup.IsSucceed() == false)
 				{
 					Status = EStatus.Fail;
+					LastError = DependBundleGroup.GetLastError();
 					InvokeCompletion();
+					return;
 				}
-				else
+
+				if (OwnerBundle.Status != AssetBundleLoaderBase.EStatus.Succeed)
 				{
-					Status = EStatus.Loading;
+					Status = EStatus.Fail;
+					LastError = OwnerBundle.LastError;
+					InvokeCompletion();
+					return;
 				}
+
+				Status = EStatus.Loading;
 			}
 
 			// 2. 加载资源对象
@@ -61,17 +68,17 @@ namespace YooAsset
 			{
 				if (IsWaitForAsyncComplete)
 				{
-					if (AssetType == null)
-						AllAssets = OwnerBundle.CacheBundle.LoadAssetWithSubAssets(AssetName);
+					if (MainAssetInfo.AssetType == null)
+						AllAssetObjects = OwnerBundle.CacheBundle.LoadAssetWithSubAssets(MainAssetInfo.AssetPath);
 					else
-						AllAssets = OwnerBundle.CacheBundle.LoadAssetWithSubAssets(AssetName, AssetType);
+						AllAssetObjects = OwnerBundle.CacheBundle.LoadAssetWithSubAssets(MainAssetInfo.AssetPath, MainAssetInfo.AssetType);
 				}
 				else
 				{
-					if (AssetType == null)
-						_cacheRequest = OwnerBundle.CacheBundle.LoadAssetWithSubAssetsAsync(AssetName);
+					if (MainAssetInfo.AssetType == null)
+						_cacheRequest = OwnerBundle.CacheBundle.LoadAssetWithSubAssetsAsync(MainAssetInfo.AssetPath);
 					else
-						_cacheRequest = OwnerBundle.CacheBundle.LoadAssetWithSubAssetsAsync(AssetName, AssetType);
+						_cacheRequest = OwnerBundle.CacheBundle.LoadAssetWithSubAssetsAsync(MainAssetInfo.AssetPath, MainAssetInfo.AssetType);
 				}
 				Status = EStatus.Checking;
 			}
@@ -85,19 +92,25 @@ namespace YooAsset
 					{
 						// 强制挂起主线程（注意：该操作会很耗时）
 						YooLogger.Warning("Suspend the main thread to load unity asset.");
-						AllAssets = _cacheRequest.allAssets;
+						AllAssetObjects = _cacheRequest.allAssets;
 					}
 					else
 					{
 						if (_cacheRequest.isDone == false)
 							return;
-						AllAssets = _cacheRequest.allAssets;
+						AllAssetObjects = _cacheRequest.allAssets;
 					}
 				}
 
-				Status = AllAssets == null ? EStatus.Fail : EStatus.Success;
+				Status = AllAssetObjects == null ? EStatus.Fail : EStatus.Success;
 				if (Status == EStatus.Fail)
-					YooLogger.Warning($"Failed to load sub assets : {AssetName} from bundle : {OwnerBundle.BundleFileInfo.BundleName}");
+				{
+					if (MainAssetInfo.AssetType == null)
+						LastError = $"Failed to load sub assets : {MainAssetInfo.AssetPath} AssetType : null AssetBundle : {OwnerBundle.MainBundleInfo.BundleName}";
+					else
+						LastError = $"Failed to load sub assets : {MainAssetInfo.AssetPath} AssetType : {MainAssetInfo.AssetType} AssetBundle : {OwnerBundle.MainBundleInfo.BundleName}";
+					YooLogger.Error(LastError);
+				}
 				InvokeCompletion();
 			}
 		}

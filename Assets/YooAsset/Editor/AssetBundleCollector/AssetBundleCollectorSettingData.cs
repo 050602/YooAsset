@@ -1,5 +1,4 @@
 ﻿using System;
-using System.IO;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,13 +7,24 @@ using UnityEditor;
 
 namespace YooAsset.Editor
 {
-	public static class AssetBundleCollectorSettingData
+	public class AssetBundleCollectorSettingData
 	{
+		private static readonly Dictionary<string, System.Type> _cacheActiveRuleTypes = new Dictionary<string, Type>();
+		private static readonly Dictionary<string, IActiveRule> _cacheActiveRuleInstance = new Dictionary<string, IActiveRule>();
+
+		private static readonly Dictionary<string, System.Type> _cacheAddressRuleTypes = new Dictionary<string, System.Type>();
+		private static readonly Dictionary<string, IAddressRule> _cacheAddressRuleInstance = new Dictionary<string, IAddressRule>();
+
 		private static readonly Dictionary<string, System.Type> _cachePackRuleTypes = new Dictionary<string, System.Type>();
 		private static readonly Dictionary<string, IPackRule> _cachePackRuleInstance = new Dictionary<string, IPackRule>();
 
 		private static readonly Dictionary<string, System.Type> _cacheFilterRuleTypes = new Dictionary<string, System.Type>();
 		private static readonly Dictionary<string, IFilterRule> _cacheFilterRuleInstance = new Dictionary<string, IFilterRule>();
+
+		/// <summary>
+		/// 配置数据是否被修改
+		/// </summary>
+		public static bool IsDirty { private set; get; } = false;
 
 
 		private static AssetBundleCollectorSetting _setting = null;
@@ -28,6 +38,30 @@ namespace YooAsset.Editor
 			}
 		}
 
+		public static List<string> GetActiveRuleNames()
+		{
+			if (_setting == null)
+				LoadSettingData();
+
+			List<string> names = new List<string>();
+			foreach (var pair in _cacheActiveRuleTypes)
+			{
+				names.Add(pair.Key);
+			}
+			return names;
+		}
+		public static List<string> GetAddressRuleNames()
+		{
+			if (_setting == null)
+				LoadSettingData();
+
+			List<string> names = new List<string>();
+			foreach (var pair in _cacheAddressRuleTypes)
+			{
+				names.Add(pair.Key);
+			}
+			return names;
+		}
 		public static List<string> GetPackRuleNames()
 		{
 			if (_setting == null)
@@ -52,6 +86,24 @@ namespace YooAsset.Editor
 			}
 			return names;
 		}
+		public static bool HasActiveRuleName(string ruleName)
+		{
+			foreach (var pair in _cacheActiveRuleTypes)
+			{
+				if (pair.Key == ruleName)
+					return true;
+			}
+			return false;
+		}
+		public static bool HasAddressRuleName(string ruleName)
+		{
+			foreach (var pair in _cacheAddressRuleTypes)
+			{
+				if (pair.Key == ruleName)
+					return true;
+			}
+			return false;
+		}
 		public static bool HasPackRuleName(string ruleName)
 		{
 			foreach (var pair in _cachePackRuleTypes)
@@ -71,26 +123,13 @@ namespace YooAsset.Editor
 			return false;
 		}
 
+
 		/// <summary>
 		/// 加载配置文件
 		/// </summary>
 		private static void LoadSettingData()
 		{
-			// 加载配置文件
-			_setting = AssetDatabase.LoadAssetAtPath<AssetBundleCollectorSetting>(EditorDefine.AssetBundleCollectorSettingFilePath);
-			if (_setting == null)
-			{
-				Debug.LogWarning($"Create new {nameof(AssetBundleCollectorSetting)}.asset : {EditorDefine.AssetBundleCollectorSettingFilePath}");
-				_setting = ScriptableObject.CreateInstance<AssetBundleCollectorSetting>();
-				EditorTools.CreateFileDirectory(EditorDefine.AssetBundleCollectorSettingFilePath);
-				AssetDatabase.CreateAsset(Setting, EditorDefine.AssetBundleCollectorSettingFilePath);
-				AssetDatabase.SaveAssets();
-				AssetDatabase.Refresh();
-			}
-			else
-			{
-				Debug.Log($"Load {nameof(AssetBundleCollectorSetting)}.asset ok");
-			}
+			_setting = EditorHelper.LoadSettingData<AssetBundleCollectorSetting>();
 
 			// IPackRule
 			{
@@ -101,11 +140,15 @@ namespace YooAsset.Editor
 				// 获取所有类型
 				List<Type> types = new List<Type>(100)
 				{
-					typeof(PackExplicit),
+					typeof(PackSeparately),
 					typeof(PackDirectory),
+					typeof(PackTopDirectory),
+					typeof(PackCollector),
+					typeof(PackGroup),
 					typeof(PackRawFile),
 				};
-				var customTypes = AssemblyUtility.GetAssignableTypes(AssemblyUtility.UnityDefaultAssemblyEditorName, typeof(IPackRule));
+
+				var customTypes = EditorTools.GetAssignableTypes(typeof(IPackRule));
 				types.AddRange(customTypes);
 				for (int i = 0; i < types.Count; i++)
 				{
@@ -129,13 +172,61 @@ namespace YooAsset.Editor
 					typeof(CollectPrefab),
 					typeof(CollectSprite)
 				};
-				var customTypes = AssemblyUtility.GetAssignableTypes(AssemblyUtility.UnityDefaultAssemblyEditorName, typeof(IFilterRule));
+
+				var customTypes = EditorTools.GetAssignableTypes(typeof(IFilterRule));
 				types.AddRange(customTypes);
 				for (int i = 0; i < types.Count; i++)
 				{
 					Type type = types[i];
 					if (_cacheFilterRuleTypes.ContainsKey(type.Name) == false)
 						_cacheFilterRuleTypes.Add(type.Name, type);
+				}
+			}
+
+			// IAddressRule
+			{
+				// 清空缓存集合
+				_cacheAddressRuleTypes.Clear();
+				_cacheAddressRuleInstance.Clear();
+
+				// 获取所有类型
+				List<Type> types = new List<Type>(100)
+				{
+					typeof(AddressByFileName),
+					typeof(AddressByCollectorAndFileName),
+					typeof(AddressByGroupAndFileName)
+				};
+
+				var customTypes = EditorTools.GetAssignableTypes(typeof(IAddressRule));
+				types.AddRange(customTypes);
+				for (int i = 0; i < types.Count; i++)
+				{
+					Type type = types[i];
+					if (_cacheAddressRuleTypes.ContainsKey(type.Name) == false)
+						_cacheAddressRuleTypes.Add(type.Name, type);
+				}
+			}
+
+			// IActiveRule
+			{
+				// 清空缓存集合
+				_cacheActiveRuleTypes.Clear();
+				_cacheActiveRuleInstance.Clear();
+
+				// 获取所有类型
+				List<Type> types = new List<Type>(100)
+				{
+					typeof(EnableGroup),
+					typeof(DisableGroup),
+				};
+
+				var customTypes = EditorTools.GetAssignableTypes(typeof(IActiveRule));
+				types.AddRange(customTypes);
+				for (int i = 0; i < types.Count; i++)
+				{
+					Type type = types[i];
+					if (_cacheActiveRuleTypes.ContainsKey(type.Name) == false)
+						_cacheActiveRuleTypes.Add(type.Name, type);
 				}
 			}
 		}
@@ -147,299 +238,60 @@ namespace YooAsset.Editor
 		{
 			if (Setting != null)
 			{
+				IsDirty = false;
 				EditorUtility.SetDirty(Setting);
 				AssetDatabase.SaveAssets();
+				Debug.Log($"{nameof(AssetBundleCollectorSetting)}.asset is saved!");
 			}
 		}
 
-		// 着色器相关
-		public static void ModifyShader(bool isCollectAllShaders, string shadersBundleName)
+		/// <summary>
+		/// 清空所有数据
+		/// </summary>
+		public static void ClearAll()
 		{
-			if (string.IsNullOrEmpty(shadersBundleName))
-				return;
-			Setting.AutoCollectShaders = isCollectAllShaders;
-			Setting.ShadersBundleName = shadersBundleName;
+			Setting.AutoCollectShaders = false;
+			Setting.ShadersBundleName = string.Empty;
+			Setting.Groups.Clear();
 			SaveFile();
 		}
 
-		// 收集器相关
-		public static void ClearAllCollector()
+		// 实例类相关
+		public static IActiveRule GetActiveRuleInstance(string ruleName)
 		{
-			Setting.Collectors.Clear();
-			SaveFile();
-		}
-		public static void AddCollector(string directory, string packRuleName, string filterRuleName, bool dontWriteAssetPath, string assetTags, bool saveFile = true)
-		{
-			// 末尾添加路径分隔符号
-			if (directory.EndsWith("/") == false)
-				directory = $"{directory}/";
+			if (_cacheActiveRuleInstance.TryGetValue(ruleName, out IActiveRule instance))
+				return instance;
 
-			// 检测收集器路径冲突
-			if (CheckConflict(directory))
-				return;
-
-			// 检测资源标签
-			if (dontWriteAssetPath && string.IsNullOrEmpty(assetTags) == false)
-				Debug.LogWarning($"Collector {directory} has asset tags : {assetTags}, It is not vliad when enable dontWriteAssetPath.");
-
-			AssetBundleCollectorSetting.Collector element = new AssetBundleCollectorSetting.Collector();
-			element.CollectDirectory = directory;
-			element.PackRuleName = packRuleName;
-			element.FilterRuleName = filterRuleName;
-			element.DontWriteAssetPath = dontWriteAssetPath;
-			element.AssetTags = assetTags;
-			Setting.Collectors.Add(element);
-
-			if (saveFile)
-				SaveFile();
-		}
-		public static void RemoveCollector(string directory)
-		{
-			for (int i = 0; i < Setting.Collectors.Count; i++)
+			// 如果不存在创建类的实例
+			if (_cacheActiveRuleTypes.TryGetValue(ruleName, out Type type))
 			{
-				if (Setting.Collectors[i].CollectDirectory == directory)
-				{
-					Setting.Collectors.RemoveAt(i);
-					break;
-				}
-			}
-			SaveFile();
-		}
-		public static void ModifyCollector(string directory, string packRuleName, string filterRuleName, bool dontWriteAssetPath, string assetTags)
-		{
-			// 检测资源标签
-			if (dontWriteAssetPath && string.IsNullOrEmpty(assetTags) == false)
-				Debug.LogWarning($"Collector '{directory}' has asset tags '{assetTags}', It is invalid when enable dontWriteAssetPath.");
-
-			for (int i = 0; i < Setting.Collectors.Count; i++)
-			{
-				var collector = Setting.Collectors[i];
-				if (collector.CollectDirectory == directory)
-				{
-					collector.PackRuleName = packRuleName;
-					collector.FilterRuleName = filterRuleName;
-					collector.DontWriteAssetPath = dontWriteAssetPath;
-					collector.AssetTags = assetTags;
-					break;
-				}
-			}
-			SaveFile();
-		}
-		public static bool IsContainsCollector(string directory)
-		{
-			for (int i = 0; i < Setting.Collectors.Count; i++)
-			{
-				if (Setting.Collectors[i].CollectDirectory == directory)
-					return true;
-			}
-			return false;
-		}
-		public static bool CheckConflict(string directory)
-		{
-			if (IsContainsCollector(directory))
-			{
-				Debug.LogError($"Asset collector already existed : {directory}");
-				return true;
-			}
-
-			for (int i = 0; i < Setting.Collectors.Count; i++)
-			{
-				var wrapper = Setting.Collectors[i];
-				string compareDirectory = wrapper.CollectDirectory;
-				if (directory.StartsWith(compareDirectory))
-				{
-					Debug.LogError($"New asset collector \"{directory}\" conflict with \"{compareDirectory}\"");
-					return true;
-				}
-				if (compareDirectory.StartsWith(directory))
-				{
-					Debug.LogError($"New asset collector {directory} conflict with {compareDirectory}");
-					return true;
-				}
-			}
-
-			return false;
-		}
-
-		/// <summary>
-		/// 获取所有的DLC标记
-		/// </summary>
-		public static List<string> GetAllAssetTags()
-		{
-			List<string> result = new List<string>();
-			for (int i = 0; i < Setting.Collectors.Count; i++)
-			{
-				var tags = Setting.Collectors[i].GetAssetTags();
-				foreach (var tag in tags)
-				{
-					if (result.Contains(tag) == false)
-						result.Add(tag);
-				}
-			}
-			return result;
-		}
-
-		/// <summary>
-		/// 获取收集器总数
-		/// </summary>
-		public static int GetCollecterCount()
-		{
-			return Setting.Collectors.Count;
-		}
-
-		/// <summary>
-		/// 获取所有的收集路径
-		/// </summary>
-		public static List<string> GetAllCollectDirectory()
-		{
-			List<string> result = new List<string>();
-			for (int i = 0; i < Setting.Collectors.Count; i++)
-			{
-				AssetBundleCollectorSetting.Collector collector = Setting.Collectors[i];
-				result.Add(collector.CollectDirectory);
-			}
-			return result;
-		}
-
-		/// <summary>
-		/// 获取所有收集的资源
-		/// 注意：跳过了不写入资源路径的收集器
-		/// </summary>
-		public static List<CollectAssetInfo> GetAllCollectAssets()
-		{
-			Dictionary<string, CollectAssetInfo> result = new Dictionary<string, CollectAssetInfo>(10000);
-			for (int i = 0; i < Setting.Collectors.Count; i++)
-			{
-				AssetBundleCollectorSetting.Collector collector = Setting.Collectors[i];
-
-				// 注意：跳过不需要写入资源路径的收集器
-				if (collector.DontWriteAssetPath)
-					continue;
-
-				bool isRawAsset = collector.PackRuleName == nameof(PackRawFile);
-				string[] findAssets = EditorTools.FindAssets(EAssetSearchType.All, collector.CollectDirectory);
-				foreach (string assetPath in findAssets)
-				{
-					if (IsValidateAsset(assetPath) == false)
-						continue;
-					if (IsCollectAsset(assetPath, collector.FilterRuleName) == false)
-						continue;
-
-					if (result.ContainsKey(assetPath) == false)
-					{
-						var collectInfo = new CollectAssetInfo(assetPath, collector.GetAssetTags(), isRawAsset);
-						result.Add(assetPath, collectInfo);
-					}
-				}
-			}
-			return result.Values.ToList();
-		}
-		private static bool IsCollectAsset(string assetPath, string filterRuleName)
-		{
-			if (Setting.AutoCollectShaders)
-			{
-				Type assetType = AssetDatabase.GetMainAssetTypeAtPath(assetPath);
-				if (assetType == typeof(UnityEngine.Shader))
-					return true;
-			}
-
-			// 根据规则设置获取标签名称
-			IFilterRule filterRuleInstance = GetFilterRuleInstance(filterRuleName);
-			return filterRuleInstance.IsCollectAsset(assetPath);
-		}
-
-		/// <summary>
-		/// 检测资源路径是否被收集器覆盖
-		/// </summary>
-		public static bool HasCollector(string assetPath)
-		{
-			// 如果收集全路径着色器
-			if (Setting.AutoCollectShaders)
-			{
-				System.Type assetType = AssetDatabase.GetMainAssetTypeAtPath(assetPath);
-				if (assetType == typeof(UnityEngine.Shader))
-					return true;
-			}
-
-			for (int i = 0; i < Setting.Collectors.Count; i++)
-			{
-				AssetBundleCollectorSetting.Collector collector = Setting.Collectors[i];
-				if (assetPath.StartsWith(collector.CollectDirectory))
-					return true;
-			}
-
-			return false;
-		}
-
-		/// <summary>
-		/// 检测资源是否有效
-		/// </summary>
-		public static bool IsValidateAsset(string assetPath)
-		{
-			if (assetPath.StartsWith("Assets/") == false && assetPath.StartsWith("Packages/") == false)
-				return false;
-
-			if (AssetDatabase.IsValidFolder(assetPath))
-				return false;
-
-			// 注意：忽略编辑器下的类型资源
-			Type type = AssetDatabase.GetMainAssetTypeAtPath(assetPath);
-			if (type == typeof(LightingDataAsset))
-				return false;
-
-			string ext = System.IO.Path.GetExtension(assetPath);
-			if (ext == "" || ext == ".dll" || ext == ".cs" || ext == ".js" || ext == ".boo" || ext == ".meta")
-				return false;
-
-			return true;
-		}
-
-		/// <summary>
-		/// 获取资源包名
-		/// </summary>
-		public static string GetBundleLabel(string assetPath)
-		{
-			// 如果收集全路径着色器
-			if (Setting.AutoCollectShaders)
-			{
-				System.Type assetType = AssetDatabase.GetMainAssetTypeAtPath(assetPath);
-				if (assetType == typeof(UnityEngine.Shader))
-				{
-					return EditorTools.GetRegularPath(Setting.ShadersBundleName);
-				}
-			}
-
-			// 获取收集器
-			AssetBundleCollectorSetting.Collector findCollector = null;
-			for (int i = 0; i < Setting.Collectors.Count; i++)
-			{
-				AssetBundleCollectorSetting.Collector collector = Setting.Collectors[i];
-				if (assetPath.StartsWith(collector.CollectDirectory))
-				{
-					findCollector = collector;
-					break;
-				}
-			}
-
-			// 如果没有找到收集器
-			string bundleLabel;
-			if (findCollector == null)
-			{
-				IPackRule defaultInstance = new PackDirectory();
-				bundleLabel = defaultInstance.GetAssetBundleLabel(assetPath);
+				instance = (IActiveRule)Activator.CreateInstance(type);
+				_cacheActiveRuleInstance.Add(ruleName, instance);
+				return instance;
 			}
 			else
 			{
-				// 根据规则设置获取标签名称
-				IPackRule getInstance = GetPackRuleInstance(findCollector.PackRuleName);
-				bundleLabel = getInstance.GetAssetBundleLabel(assetPath);
+				throw new Exception($"{nameof(IActiveRule)}类型无效：{ruleName}");
 			}
-
-			// 返回包名
-			return EditorTools.GetRegularPath(bundleLabel);
 		}
+		public static IAddressRule GetAddressRuleInstance(string ruleName)
+		{
+			if (_cacheAddressRuleInstance.TryGetValue(ruleName, out IAddressRule instance))
+				return instance;
 
-		private static IPackRule GetPackRuleInstance(string ruleName)
+			// 如果不存在创建类的实例
+			if (_cacheAddressRuleTypes.TryGetValue(ruleName, out Type type))
+			{
+				instance = (IAddressRule)Activator.CreateInstance(type);
+				_cacheAddressRuleInstance.Add(ruleName, instance);
+				return instance;
+			}
+			else
+			{
+				throw new Exception($"{nameof(IAddressRule)}类型无效：{ruleName}");
+			}
+		}
+		public static IPackRule GetPackRuleInstance(string ruleName)
 		{
 			if (_cachePackRuleInstance.TryGetValue(ruleName, out IPackRule instance))
 				return instance;
@@ -456,7 +308,7 @@ namespace YooAsset.Editor
 				throw new Exception($"{nameof(IPackRule)}类型无效：{ruleName}");
 			}
 		}
-		private static IFilterRule GetFilterRuleInstance(string ruleName)
+		public static IFilterRule GetFilterRuleInstance(string ruleName)
 		{
 			if (_cacheFilterRuleInstance.TryGetValue(ruleName, out IFilterRule instance))
 				return instance;
@@ -471,6 +323,75 @@ namespace YooAsset.Editor
 			else
 			{
 				throw new Exception($"{nameof(IFilterRule)}类型无效：{ruleName}");
+			}
+		}
+
+		// 可寻址编辑相关
+		public static void ModifyAddressable(bool enableAddressable)
+		{
+			Setting.EnableAddressable = enableAddressable;
+			IsDirty = true;
+		}
+
+		// 着色器编辑相关
+		public static void ModifyShader(bool isCollectAllShaders, string shadersBundleName)
+		{
+			Setting.AutoCollectShaders = isCollectAllShaders;
+			Setting.ShadersBundleName = shadersBundleName;
+			IsDirty = true;
+		}
+
+		// 资源分组编辑相关
+		public static void CreateGroup(string groupName)
+		{
+			AssetBundleCollectorGroup group = new AssetBundleCollectorGroup();
+			group.GroupName = groupName;
+			Setting.Groups.Add(group);
+			IsDirty = true;
+		}
+		public static void RemoveGroup(AssetBundleCollectorGroup group)
+		{
+			if (Setting.Groups.Remove(group))
+			{
+				IsDirty = true;
+			}
+			else
+			{
+				Debug.LogWarning($"Failed remove group : {group.GroupName}");
+			}
+		}
+		public static void ModifyGroup(AssetBundleCollectorGroup group)
+		{
+			if (group != null)
+			{
+				IsDirty = true;
+			}
+		}
+
+		// 资源收集器编辑相关
+		public static void CreateCollector(AssetBundleCollectorGroup group, string collectPath)
+		{
+			AssetBundleCollector collector = new AssetBundleCollector();
+			collector.CollectPath = collectPath;
+			group.Collectors.Add(collector);
+			IsDirty = true;
+		}
+		public static void RemoveCollector(AssetBundleCollectorGroup group, AssetBundleCollector collector)
+		{
+			if (group.Collectors.Remove(collector))
+			{
+				IsDirty = true;
+			}
+			else
+			{
+				Debug.LogWarning($"Failed remove collector : {collector.CollectPath}");
+			}
+		}
+		public static void ModifyCollector(AssetBundleCollectorGroup group, AssetBundleCollector collector)
+		{
+			if (group != null && collector != null)
+			{
+				IsDirty = true;
 			}
 		}
 	}

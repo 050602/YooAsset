@@ -10,11 +10,6 @@ namespace YooAsset.Editor
 	public class BuildParameters
 	{
 		/// <summary>
-		/// 验证构建结果
-		/// </summary>
-		public bool VerifyBuildingResult = false;
-
-		/// <summary>
 		/// 输出的根目录
 		/// </summary>
 		public string OutputRoot;
@@ -25,42 +20,52 @@ namespace YooAsset.Editor
 		public BuildTarget BuildTarget;
 
 		/// <summary>
+		/// 构建模式
+		/// </summary>
+		public EBuildMode BuildMode;
+
+		/// <summary>
 		/// 构建的版本（资源版本号）
 		/// </summary>
 		public int BuildVersion;
 
 		/// <summary>
-		/// 启用自动分包机制
-		/// 说明：自动分包机制可以实现资源零冗余
+		/// 内置资源标签集合（首包资源标签）
+		/// 注意：分号为分隔符
 		/// </summary>
-		public bool EnableAutoCollect = true;
+		public string BuildinTags;
+
+
+		/// <summary>
+		/// 验证构建结果
+		/// </summary>
+		public bool VerifyBuildingResult = false;
+
+		/// <summary>
+		/// 启用可寻址资源定位
+		/// </summary>
+		public bool EnableAddressable = false;
 
 		/// <summary>
 		/// 追加文件扩展名
 		/// </summary>
 		public bool AppendFileExtension = false;
 
+		/// <summary>
+		/// 拷贝内置资源文件到StreamingAssets目录（首包资源文件）
+		/// </summary>
+		public bool CopyBuildinTagFiles = false;
+
 
 		/// <summary>
-		/// 强制重新构建整个项目，如果为FALSE则是增量打包
+		/// 加密类
 		/// </summary>
-		public bool ForceRebuild;
-
-		/// <summary>
-		/// 内置资源的标记列表
-		/// 注意：分号为分隔符
-		/// </summary>
-		public string BuildinTags;
+		public IEncryptionServices EncryptionServices = null;
 
 		/// <summary>
 		/// 压缩选项
 		/// </summary>
-		public ECompressOption CompressOption;
-
-		/// <summary>
-		/// 文件名附加上哈希值
-		/// </summary>
-		public bool AppendHash = false;
+		public ECompressOption CompressOption = ECompressOption.Uncompressed;
 
 		/// <summary>
 		/// 禁止写入类型树结构（可以降低包体和内存并提高加载效率）
@@ -72,14 +77,9 @@ namespace YooAsset.Editor
 		/// </summary>
 		public bool IgnoreTypeTreeChanges = true;
 
-		/// <summary>
-		/// 禁用名称查找资源（可以降内存并提高加载效率）
-		/// </summary>
-		public bool DisableLoadAssetByFileName = false;
-
 
 		/// <summary>
-		/// 获取内置标记列表
+		/// 获取内置资源标签列表（首包资源标签）
 		/// </summary>
 		public List<string> GetBuildinTags()
 		{

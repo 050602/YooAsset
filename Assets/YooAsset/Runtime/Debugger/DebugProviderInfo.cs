@@ -4,27 +4,38 @@ using System.Collections.Generic;
 
 namespace YooAsset
 {
+	[Serializable]
 	internal class DebugProviderInfo : IComparer<DebugProviderInfo>, IComparable<DebugProviderInfo>
 	{
 		/// <summary>
 		/// 资源对象路径
 		/// </summary>
-		public string AssetPath { set; get; }
+		public string AssetPath;
+
+		/// <summary>
+		/// 资源出生的场景
+		/// </summary>
+		public string SpawnScene;
+
+		/// <summary>
+		/// 资源出生的时间
+		/// </summary>
+		public string SpawnTime;
 
 		/// <summary>
 		/// 引用计数
 		/// </summary>
-		public int RefCount { set; get; }
+		public int RefCount;
 
 		/// <summary>
 		/// 加载状态
 		/// </summary>
-		public int Status { set; get; }
+		public int Status;
 
 		/// <summary>
 		/// 依赖的资源包列表
 		/// </summary>
-		public readonly List<DebugBundleInfo> BundleInfos = new List<DebugBundleInfo>();
+		public List<DebugBundleInfo> BundleInfos;
 
 		public int CompareTo(DebugProviderInfo other)
 		{
